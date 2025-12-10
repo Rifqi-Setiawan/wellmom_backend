@@ -29,11 +29,18 @@ def _validate_location(value: Tuple[float, float]) -> Tuple[float, float]:
 
 
 class IbuHamilBase(BaseModel):
-    user_id: int
-    puskesmas_id: Optional[int] = None
-    perawat_id: Optional[int] = None
+    """Base schema for IbuHamil - common fields for input/output
+    
+    NOTE: user_id is NOT here because it's set programmatically, not user input
+    """
     nik: str
     date_of_birth: date
+    address: str
+    location: Tuple[float, float]  # (longitude, latitude)
+    emergency_contact_name: str
+    emergency_contact_phone: str
+    
+    # Optional fields
     age: Optional[int] = None
     blood_type: Optional[str] = None
     last_menstrual_period: Optional[date] = None
@@ -42,14 +49,10 @@ class IbuHamilBase(BaseModel):
     birth_number: Optional[int] = 0
     miscarriage_number: Optional[int] = 0
     previous_pregnancy_complications: Optional[str] = None
-    address: str
     kelurahan: Optional[str] = None
     kecamatan: Optional[str] = None
     rt_rw: Optional[str] = None
-    location: Tuple[float, float]
     house_photo_url: Optional[str] = None
-    emergency_contact_name: str
-    emergency_contact_phone: str
     emergency_contact_relation: Optional[str] = None
     height_cm: Optional[float] = None
     pre_pregnancy_weight_kg: Optional[float] = None
@@ -59,7 +62,6 @@ class IbuHamilBase(BaseModel):
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = True
     data_sharing_consent: Optional[bool] = False
-    is_active: Optional[bool] = True
 
     @field_validator("nik")
     @classmethod
@@ -80,9 +82,6 @@ class IbuHamilBase(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "user_id": 20,
-            "puskesmas_id": 1,
-            "perawat_id": 1,
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
             "age": 39,
@@ -97,7 +96,7 @@ class IbuHamilBase(BaseModel):
             "kelurahan": "Sungai Penuh",
             "kecamatan": "Pesisir Bukit",
             "rt_rw": "02/05",
-            "location": [101.3912, -2.0645],
+            "location": (101.3912, -2.0645),
             "house_photo_url": "/files/rumah_ibu.jpg",
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
@@ -110,35 +109,20 @@ class IbuHamilBase(BaseModel):
             "healthcare_preference": "puskesmas",
             "whatsapp_consent": True,
             "data_sharing_consent": False,
-            "is_active": True,
         }
     })
 
 
 class IbuHamilCreate(IbuHamilBase):
-    assigned_by_user_id: Optional[int] = None
-    assignment_date: Optional[datetime] = None
-    assignment_distance_km: Optional[float] = None
-    assignment_method: Optional[str] = None
-
-    @field_validator("assignment_method")
-    @classmethod
-    def validate_assignment_method(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in ASSIGNMENT_METHODS:
-            raise ValueError(f"Assignment method must be one of {sorted(ASSIGNMENT_METHODS)}")
-        return v
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            **IbuHamilBase.model_config.get("json_schema_extra", {}).get("example", {}),
-            "assigned_by_user_id": 10,
-            "assignment_method": "auto",
-            "assignment_distance_km": 2.5,
-        }
-    })
+    """Schema for creating new IbuHamil
+    
+    NOTE: user_id is passed separately to CRUD method, not in schema!
+    """
+    pass  # Inherits all from Base, no additional fields needed for creation
 
 
 class IbuHamilUpdate(BaseModel):
+    """Schema for updating IbuHamil - all fields optional"""
     puskesmas_id: Optional[int] = None
     perawat_id: Optional[int] = None
     nik: Optional[str] = None
@@ -201,7 +185,7 @@ class IbuHamilUpdate(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "perawat_id": 2,
-            "location": [101.4, -2.1],
+            "location": (101.4, -2.1),
             "risk_level": "high",
             "current_medications": "Vitamin D, Asam folat",
         }
@@ -209,18 +193,31 @@ class IbuHamilUpdate(BaseModel):
 
 
 class IbuHamilResponse(IbuHamilBase):
+    """Schema for IbuHamil API responses - includes all fields + metadata"""
     id: int
+    user_id: int  # ✅ NOW it's here (output only)
+    puskesmas_id: Optional[int] = None
+    perawat_id: Optional[int] = None
     assigned_by_user_id: Optional[int] = None
     assignment_date: Optional[datetime] = None
     assignment_distance_km: Optional[float] = None
     assignment_method: Optional[str] = None
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True, json_schema_extra={
         "example": {
-            **IbuHamilBase.model_config.get("json_schema_extra", {}).get("example", {}),
             "id": 1,
+            "user_id": 20,  # Now in Response only
+            "puskesmas_id": 1,
+            "perawat_id": 1,
+            "nik": "3175091201850001",
+            "date_of_birth": "1985-12-12",
+            "location": (101.3912, -2.0645),
+            "address": "Jl. Mawar No. 10",
+            "emergency_contact_name": "Budi",
+            "emergency_contact_phone": "+6281234567890",
             "assigned_by_user_id": 10,
             "assignment_date": "2025-01-01T10:00:00Z",
             "assignment_distance_km": 2.5,

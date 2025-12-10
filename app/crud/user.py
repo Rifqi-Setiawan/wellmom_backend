@@ -13,7 +13,8 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use PBKDF2 by default to avoid local bcrypt backend issues; keep bcrypt for legacy hashes
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
 
 def _normalize_phone(phone: str) -> str:
@@ -24,11 +25,20 @@ def _normalize_phone(phone: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except ValueError:
+        # Return False if the hash scheme is unsupported in this environment
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    try:
+        return pwd_context.hash(password)
+    except ValueError:
+        # Fallback to PBKDF2 if bcrypt backend is unavailable
+        fallback_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+        return fallback_ctx.hash(password)
 
 
 class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):

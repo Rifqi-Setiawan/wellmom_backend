@@ -25,6 +25,45 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         stmt = select(IbuHamil).where(IbuHamil.perawat_id == perawat_id)
         return db.scalars(stmt).all()
 
+    def create_with_location(
+        self, db: Session, *, obj_in: IbuHamilCreate, user_id: int
+    ) -> IbuHamil:
+        """Create Ibu Hamil with PostGIS location conversion.
+        
+        Args:
+            db: Database session
+            obj_in: IbuHamilCreate schema with location as tuple (lon, lat)
+            user_id: User ID to link to
+            
+        Returns:
+            Created IbuHamil instance
+        """
+        # Convert Pydantic model to dict
+        obj_data = obj_in.model_dump(exclude={'location'})
+        
+        # Convert location tuple to WKT string for PostGIS
+        location_wkt = None
+        if obj_in.location:
+            lon, lat = obj_in.location
+            location_wkt = f'POINT({lon} {lat})'
+        
+        # Create IbuHamil instance
+        db_obj = IbuHamil(
+            **obj_data,
+            user_id=user_id,
+            location=location_wkt  # SQLAlchemy will wrap with ST_GeogFromText
+        )
+        
+        db.add(db_obj)
+        try:
+            db.commit()
+            db.refresh(db_obj)
+        except Exception:
+            db.rollback()
+            raise
+            
+        return db_obj
+
     def get_unassigned(self, db: Session) -> List[IbuHamil]:
         """Get Ibu Hamil not yet assigned to any Puskesmas."""
         stmt = select(IbuHamil).where(IbuHamil.puskesmas_id.is_(None))
