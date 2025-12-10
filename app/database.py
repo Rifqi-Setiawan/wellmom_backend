@@ -3,11 +3,11 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-# Create database engine
+# Create database engine with PostGIS support
 engine = create_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,  # Log SQL queries in debug mode
-    pool_pre_ping=True,   # Verify connections before using
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
 )
 
 # Create SessionLocal class
@@ -18,7 +18,7 @@ Base = declarative_base()
 
 # Dependency for routes
 def get_db():
-    """Database session dependency"""
+    """Database session dependency for FastAPI routes"""
     db = SessionLocal()
     try:
         yield db
