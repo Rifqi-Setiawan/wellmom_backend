@@ -56,6 +56,10 @@ class CRUDPerawat(CRUDBase[Perawat, PerawatCreate, PerawatUpdate]):
             raise
         return perawat
 
+    def get_by_nip(self, db: Session, *, nip: str) -> Optional[Perawat]:
+        stmt = select(Perawat).where(Perawat.nip == nip).limit(1)
+        return db.scalars(stmt).first()
+
     def assign_patient(
         self, db: Session, *, perawat_id: int, ibu_hamil_id: int
     ) -> Optional[Perawat]:

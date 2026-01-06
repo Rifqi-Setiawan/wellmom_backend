@@ -7,6 +7,7 @@ from typing import List, Optional
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import secrets
 
 from app.crud.base import CRUDBase
 from app.models.user import User
@@ -82,6 +83,39 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         if not user:
             return None
         user.password_hash = get_password_hash(new_password)
+        try:
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            db.rollback()
+            raise
+        return user
+
+    def create_verification_token(self, db: Session, *, user_id: int) -> Optional[str]:
+        """Generate and store a verification token for the user."""
+        user = self.get(db, user_id)
+        if not user:
+            return None
+        token = secrets.token_urlsafe(32)
+        user.verification_token = token
+        try:
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except Exception:
+            db.rollback()
+            raise
+        return token
+
+    def verify_by_token(self, db: Session, *, token: str) -> Optional[User]:
+        """Verify user using a stored verification token."""
+        stmt = select(User).where(User.verification_token == token).limit(1)
+        user = db.scalars(stmt).first()
+        if not user:
+            return None
+        user.is_verified = True
+        user.verification_token = None
         try:
             db.add(user)
             db.commit()

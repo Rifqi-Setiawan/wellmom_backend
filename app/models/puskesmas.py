@@ -74,6 +74,8 @@ class Puskesmas(Base):
     approved_by_admin_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     approved_at = Column(TIMESTAMP)
     rejection_reason = Column(Text)
+    suspension_reason = Column(Text)
+    suspended_at = Column(TIMESTAMP)
     admin_notes = Column(Text)
     is_active = Column(Boolean, default=False, index=True)
     

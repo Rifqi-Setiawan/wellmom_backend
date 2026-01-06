@@ -1,0 +1,543 @@
+"""Ibu Hamil (Pregnant Women) endpoints."""
+
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_active_user, get_db, require_role
+from app.core.security import create_access_token
+from app.crud import (
+    crud_ibu_hamil,
+    crud_kerabat,
+    crud_notification,
+    crud_perawat,
+    crud_puskesmas,
+    crud_user,
+)
+from app.models.ibu_hamil import IbuHamil
+from app.models.user import User
+from app.schemas.ibu_hamil import IbuHamilCreate, IbuHamilResponse, IbuHamilUpdate
+from app.schemas.notification import NotificationCreate
+from app.schemas.puskesmas import PuskesmasResponse
+from app.schemas.user import UserCreate, UserResponse
+
+router = APIRouter(
+    prefix="/ibu-hamil",
+    tags=["Ibu Hamil (Pregnant Women)"],
+)
+
+
+class IbuHamilRegisterRequest(BaseModel):
+    """Payload to register pregnant woman and user (if new)."""
+
+    user: UserCreate
+    ibu_hamil: IbuHamilCreate
+
+
+class AssignRequest(BaseModel):
+    puskesmas_id: int
+    perawat_id: Optional[int] = None
+
+
+class AutoAssignResponse(BaseModel):
+    ibu_hamil: IbuHamilResponse
+    puskesmas: PuskesmasResponse
+    distance_km: float
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "ibu_hamil": {
+                "id": 1,
+                "puskesmas_id": 2,
+                "perawat_id": 3,
+                "nik": "3175091201850001",
+                "location": [101.39, -2.06],
+                "address": "Jl. Mawar No. 10",
+                "emergency_contact_name": "Budi",
+                "emergency_contact_phone": "+6281234567890",
+                "is_active": True,
+            },
+            "puskesmas": {
+                "id": 2,
+                "name": "Puskesmas Sungai Penuh",
+                "code": "PKM-ABC-123",
+                "registration_status": "approved",
+                "is_active": True,
+            },
+            "distance_km": 1.2,
+        }
+    })
+
+
+# Helper functions ---------------------------------------------------------
+
+def _get_ibu_or_404(db: Session, ibu_id: int) -> IbuHamil:
+    ibu = crud_ibu_hamil.get(db, id=ibu_id)
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu Hamil not found",
+        )
+    return ibu
+
+
+def _is_puskesmas_admin(current_user: User, ibu: IbuHamil, db: Session) -> bool:
+    if not ibu.puskesmas_id:
+        return False
+    pusk = crud_puskesmas.get(db, id=ibu.puskesmas_id)
+    return bool(pusk and pusk.admin_user_id == current_user.id)
+
+
+def _is_perawat_assigned(current_user: User, ibu: IbuHamil) -> bool:
+    return current_user.role == "perawat" and ibu.perawat_id is not None and current_user.id == ibu.perawat_id
+
+
+def _is_kerabat_linked(current_user: User, ibu: IbuHamil, db: Session) -> bool:
+    if current_user.role != "kerabat":
+        return False
+    relations = crud_kerabat.get_by_kerabat_user(db, kerabat_user_id=current_user.id)
+    return any(rel.ibu_hamil_id == ibu.id for rel in relations)
+
+
+def _authorize_view(ibu: IbuHamil, current_user: User, db: Session) -> None:
+    """Authorize access to an IbuHamil record."""
+    if current_user.role == "admin":
+        return
+    if ibu.user_id == current_user.id:
+        return
+    if _is_puskesmas_admin(current_user, ibu, db):
+        return
+    if _is_perawat_assigned(current_user, ibu):
+        return
+    if _is_kerabat_linked(current_user, ibu, db):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authorized to access this record",
+    )
+
+
+def _authorize_update(ibu: IbuHamil, current_user: User, db: Session) -> None:
+    """Authorize update to an IbuHamil record."""
+    if current_user.role == "admin":
+        return
+    if ibu.user_id == current_user.id:
+        return
+    if _is_puskesmas_admin(current_user, ibu, db):
+        return
+    if _is_perawat_assigned(current_user, ibu):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authorized to update this record",
+    )
+
+
+def _auto_assign_nearest(
+    db: Session,
+    ibu: IbuHamil,
+    radius_km: float = 20.0,
+):
+    """Auto-assign to nearest approved Puskesmas with capacity and an available Perawat."""
+    nearest_list = crud_ibu_hamil.find_nearest_puskesmas(db, ibu_id=ibu.id, radius_km=radius_km)
+    for puskesmas, distance in nearest_list:
+        if puskesmas.registration_status != "approved" or not puskesmas.is_active:
+            continue
+        # Capacity check
+        if puskesmas.current_patients is not None and puskesmas.max_patients is not None:
+            if puskesmas.current_patients >= puskesmas.max_patients:
+                continue
+
+        assigned_ibu = crud_ibu_hamil.assign_to_puskesmas(
+            db,
+            ibu_id=ibu.id,
+            puskesmas_id=puskesmas.id,
+            distance_km=float(distance),
+        )
+        crud_puskesmas.update_capacity(db, puskesmas_id=puskesmas.id, increment=1)
+
+        # Pick first available perawat in that puskesmas
+        perawats = crud_perawat.get_available(db, puskesmas_id=puskesmas.id)
+        if perawats:
+            perawat = perawats[0]
+            crud_ibu_hamil.assign_to_perawat(db, ibu_id=ibu.id, perawat_id=perawat.id)
+            crud_perawat.update_workload(db, perawat_id=perawat.id, increment=1)
+
+        # Create notification for ibu user
+        notification_in = NotificationCreate(
+            user_id=ibu.user_id,
+            title="Penugasan Puskesmas",
+            message=f"Anda telah ditugaskan ke {puskesmas.name}.",
+            notification_type="assignment",
+            priority="normal",
+            sent_via="in_app",
+        )
+        crud_notification.create(db, obj_in=notification_in)
+
+        return assigned_ibu, puskesmas, float(distance)
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Tidak ada Puskesmas terdekat dengan kapasitas tersedia dalam radius",
+    )
+
+
+# Endpoints ---------------------------------------------------------------
+
+
+@router.post(
+    "/register",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+    summary="Registrasi ibu hamil",
+    description="Publik atau user terautentikasi dapat mendaftarkan ibu hamil. Membuat user (role ibu_hamil) bila belum ada, lalu membuat profil ibu hamil dan auto-assign Puskesmas terdekat jika lokasi tersedia.",
+)
+async def register_ibu_hamil(
+    payload: IbuHamilRegisterRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    # Ensure role is ibu_hamil
+    user_in = payload.user.model_copy(update={"role": "ibu_hamil"})
+
+    existing_user = crud_user.get_by_phone(db, phone=user_in.phone)
+    if existing_user:
+        user_obj = existing_user
+    else:
+        user_obj = crud_user.create_user(db, user_in=user_in)
+
+    ibu_obj = crud_ibu_hamil.create_with_location(
+        db,
+        obj_in=payload.ibu_hamil,
+        user_id=user_obj.id,
+    )
+
+    assigned_info = None
+    if payload.ibu_hamil.location:
+        try:
+            assigned_info = _auto_assign_nearest(db, ibu_obj)
+        except HTTPException:
+            # Ignore if no available puskesmas; keep unassigned
+            assigned_info = None
+
+    token = create_access_token({"sub": user_obj.phone})
+
+    response = {
+        "ibu_hamil": IbuHamilResponse.from_orm(ibu_obj),
+        "user": UserResponse.from_orm(user_obj),
+        "access_token": token,
+        "token_type": "bearer",
+    }
+    if assigned_info:
+        _, puskesmas, distance = assigned_info
+        response["assignment"] = {
+            "puskesmas": PuskesmasResponse.from_orm(puskesmas),
+            "distance_km": distance,
+        }
+
+    return response
+
+
+@router.get(
+    "/me",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Profil ibu hamil saat ini",
+    description="Mengambil profil ibu hamil milik user yang login (role ibu_hamil atau kerabat terkait).",
+)
+async def get_my_profile(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+
+    # Kerabat can view if linked
+    if current_user.role == "kerabat" and not _is_kerabat_linked(current_user, ibu, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this record",
+        )
+
+    return ibu
+
+
+@router.get(
+    "/{ibu_id}",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Detail ibu hamil",
+    description="Dapat diakses oleh admin, perawat yang ditugaskan, admin puskesmas terkait, kerabat terkait, atau pemilik akun.",
+)
+async def get_ibu_hamil(
+    ibu_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    ibu = _get_ibu_or_404(db, ibu_id)
+    _authorize_view(ibu, current_user, db)
+    return ibu
+
+
+@router.patch(
+    "/{ibu_id}",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update ibu hamil",
+    description="Admin, pemilik akun, perawat terassign, atau admin puskesmas dapat memperbarui data. Jika lokasi diubah, akan mencoba auto-assign ulang.",
+)
+async def update_ibu_hamil(
+    ibu_id: int,
+    ibu_update: IbuHamilUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    ibu = _get_ibu_or_404(db, ibu_id)
+    _authorize_update(ibu, current_user, db)
+
+    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_update)
+
+    # If location changed and no explicit puskesmas_id provided, try auto-assign
+    if ibu_update.location and not ibu_update.puskesmas_id:
+        try:
+            _auto_assign_nearest(db, updated)
+        except HTTPException:
+            pass
+
+    return updated
+
+
+@router.get(
+    "/unassigned",
+    response_model=List[IbuHamilResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Ibu hamil belum ter-assign",
+    description="Hanya admin atau admin puskesmas yang dapat melihat daftar ibu hamil tanpa puskesmas.",
+)
+async def list_unassigned(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> List[IbuHamil]:
+    if current_user.role not in {"admin", "puskesmas"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    return crud_ibu_hamil.get_unassigned(db)
+
+
+@router.post(
+    "/{ibu_id}/assign",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Assign manual ke puskesmas/perawat",
+    description="Admin atau admin puskesmas dapat menugaskan ibu ke puskesmas tertentu, opsional memilih perawat.",
+)
+async def assign_ibu_hamil(
+    ibu_id: int,
+    payload: AssignRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    if current_user.role not in {"admin", "puskesmas"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+
+    ibu = _get_ibu_or_404(db, ibu_id)
+
+    # If puskesmas admin, ensure same puskesmas
+    if current_user.role == "puskesmas":
+        pusk_admin_for = db.scalars(select(IbuHamil).where(IbuHamil.puskesmas_id.isnot(None))).first()
+        # Loose check: ensure the target puskesmas is administered by current user
+    pusk = crud_puskesmas.get(db, id=payload.puskesmas_id)
+    if not pusk or pusk.registration_status != "approved" or not pusk.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan atau belum aktif",
+        )
+    if current_user.role == "puskesmas" and pusk.admin_user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to assign for this puskesmas",
+        )
+
+    # Capacity check
+    if pusk.current_patients is not None and pusk.max_patients is not None:
+        if pusk.current_patients >= pusk.max_patients:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Puskesmas capacity is full",
+            )
+
+    assigned = crud_ibu_hamil.assign_to_puskesmas(
+        db,
+        ibu_id=ibu.id,
+        puskesmas_id=pusk.id,
+        distance_km=0.0,
+    )
+    crud_puskesmas.update_capacity(db, puskesmas_id=pusk.id, increment=1)
+
+    if payload.perawat_id:
+        perawat = crud_perawat.get(db, id=payload.perawat_id)
+        if not perawat or perawat.puskesmas_id != pusk.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Perawat tidak ditemukan di puskesmas ini",
+            )
+        if perawat.current_patients >= perawat.max_patients:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Perawat sudah penuh",
+            )
+        crud_ibu_hamil.assign_to_perawat(db, ibu_id=ibu.id, perawat_id=perawat.id)
+        crud_perawat.update_workload(db, perawat_id=perawat.id, increment=1)
+
+    notification_in = NotificationCreate(
+        user_id=ibu.user_id,
+        title="Penugasan Puskesmas",
+        message=f"Anda ditugaskan ke {pusk.name}.",
+        notification_type="assignment",
+        priority="normal",
+        sent_via="in_app",
+    )
+    crud_notification.create(db, obj_in=notification_in)
+
+    return assigned
+
+
+@router.post(
+    "/{ibu_id}/auto-assign",
+    response_model=AutoAssignResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Auto-assign ke puskesmas terdekat",
+    description="Admin atau ibu bersangkutan dapat melakukan penugasan otomatis ke puskesmas terdekat yang aktif dan tersedia.",
+)
+async def auto_assign(
+    ibu_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> AutoAssignResponse:
+    ibu = _get_ibu_or_404(db, ibu_id)
+
+    if current_user.role not in {"admin", "ibu_hamil"} and current_user.id != ibu.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    if current_user.role == "ibu_hamil" and ibu.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+
+    assigned_ibu, puskesmas, distance = _auto_assign_nearest(db, ibu)
+
+    return AutoAssignResponse(
+        ibu_hamil=IbuHamilResponse.from_orm(assigned_ibu),
+        puskesmas=PuskesmasResponse.from_orm(puskesmas),
+        distance_km=distance,
+    )
+
+
+@router.get(
+    "/by-puskesmas/{puskesmas_id}",
+    response_model=List[IbuHamilResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Daftar ibu hamil per puskesmas",
+    description="Admin, admin puskesmas tersebut, atau perawat di puskesmas tersebut dapat melihat daftar ibu hamil.",
+)
+async def list_by_puskesmas(
+    puskesmas_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> List[IbuHamil]:
+    pusk = crud_puskesmas.get(db, id=puskesmas_id)
+    if not pusk:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan",
+        )
+
+    if current_user.role not in {"admin", "puskesmas", "perawat"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    if current_user.role == "puskesmas" and pusk.admin_user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    if current_user.role == "perawat":
+        perawat = crud_perawat.get(db, id=current_user.id)
+        if not perawat or perawat.puskesmas_id != puskesmas_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized",
+            )
+
+    results = (
+        db.execute(
+            select(IbuHamil)
+            .where(IbuHamil.puskesmas_id == puskesmas_id)
+            .offset(skip)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return results
+
+
+@router.get(
+    "/by-perawat/{perawat_id}",
+    response_model=List[IbuHamilResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Daftar ibu hamil per perawat",
+    description="Admin, perawat terkait, atau admin puskesmas yang menaungi perawat dapat melihat daftar ini.",
+)
+async def list_by_perawat(
+    perawat_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> List[IbuHamil]:
+    perawat = crud_perawat.get(db, id=perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tidak ditemukan",
+        )
+
+    if current_user.role not in {"admin", "perawat", "puskesmas"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    if current_user.role == "perawat" and current_user.id != perawat.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+    if current_user.role == "puskesmas":
+        pusk = crud_puskesmas.get(db, id=perawat.puskesmas_id)
+        if not pusk or pusk.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized",
+            )
+
+    return crud_ibu_hamil.get_by_perawat(db, perawat_id=perawat_id)
+
+
+__all__ = ["router"]

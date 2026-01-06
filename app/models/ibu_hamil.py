@@ -17,21 +17,28 @@ class IbuHamil(Base):
     assigned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     
     # Identitas Pribadi
+    nama_lengkap = Column(String(255), nullable=False)
     nik = Column(String(16), unique=True, nullable=False, index=True)
     date_of_birth = Column(Date, nullable=False)
     age = Column(Integer)
     blood_type = Column(String(5))
     
     # Data Kehamilan
-    last_menstrual_period = Column(Date)
-    estimated_due_date = Column(Date)
-    pregnancy_number = Column(Integer, default=1)
-    birth_number = Column(Integer, default=0)
-    miscarriage_number = Column(Integer, default=0)
-    previous_pregnancy_complications = Column(Text)
+    last_menstrual_period = Column(Date)  # HPHT
+    estimated_due_date = Column(Date)  # HPL
+    usia_kehamilan = Column(Integer)  # Usia kehamilan (minggu/bulan)
+    kehamilan_ke = Column(Integer, default=1)  # Kehamilan ke-berapa
+    jumlah_anak = Column(Integer, default=0)  # Jumlah anak yang telah dilahirkan
+    miscarriage_number = Column(Integer, default=0)  # Riwayat keguguran
+    jarak_kehamilan_terakhir = Column(String(100))  # Jarak kehamilan terakhir
+    previous_pregnancy_complications = Column(Text)  # Komplikasi kehamilan sebelumnya
+    pernah_caesar = Column(Boolean, default=False)
+    pernah_perdarahan_saat_hamil = Column(Boolean, default=False)
     
     # Alamat & Lokasi
     address = Column(Text, nullable=False)
+    provinsi = Column(String(100))
+    kota_kabupaten = Column(String(100))
     kelurahan = Column(String(100))
     kecamatan = Column(String(100))
     rt_rw = Column(String(20))
@@ -44,6 +51,13 @@ class IbuHamil(Base):
     emergency_contact_relation = Column(String(50))
     
     # Riwayat Kesehatan
+    darah_tinggi = Column(Boolean, default=False)
+    diabetes = Column(Boolean, default=False)
+    anemia = Column(Boolean, default=False)
+    penyakit_jantung = Column(Boolean, default=False)
+    asma = Column(Boolean, default=False)
+    penyakit_ginjal = Column(Boolean, default=False)
+    tbc_malaria = Column(Boolean, default=False)
     height_cm = Column(Float)
     pre_pregnancy_weight_kg = Column(Float)
     medical_history = Column(Text)

@@ -28,32 +28,72 @@ def _validate_location(value: Tuple[float, float]) -> Tuple[float, float]:
     return lon, lat
 
 
+class RiwayatKesehatanIbu(BaseModel):
+    """Riwayat kesehatan ibu hamil"""
+    darah_tinggi: bool = False
+    diabetes: bool = False
+    anemia: bool = False
+    penyakit_jantung: bool = False
+    asma: bool = False
+    penyakit_ginjal: bool = False
+    tbc_malaria: bool = False
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "darah_tinggi": False,
+            "diabetes": False,
+            "anemia": False,
+            "penyakit_jantung": False,
+            "asma": False,
+            "penyakit_ginjal": False,
+            "tbc_malaria": False,
+        }
+    })
+
+
 class IbuHamilBase(BaseModel):
     """Base schema for IbuHamil - common fields for input/output
     
     NOTE: user_id is NOT here because it's set programmatically, not user input
     """
+    # Identitas Pribadi
+    nama_lengkap: str
     nik: str
     date_of_birth: date
+    
+    # Alamat & Lokasi
     address: str
     location: Tuple[float, float]  # (longitude, latitude)
+    provinsi: Optional[str] = None
+    kota_kabupaten: Optional[str] = None
+    kelurahan: Optional[str] = None
+    kecamatan: Optional[str] = None
+    rt_rw: Optional[str] = None
+    
+    # Data Kehamilan
+    last_menstrual_period: Optional[date] = None  # HPHT
+    estimated_due_date: Optional[date] = None  # HPL
+    usia_kehamilan: Optional[int] = None  # Usia kehamilan dalam minggu
+    kehamilan_ke: Optional[int] = 1  # Kehamilan ke berapa
+    jumlah_anak: Optional[int] = 0  # Jumlah anak yang sudah dilahirkan
+    jarak_kehamilan_terakhir: Optional[str] = None  # Jarak kehamilan terakhir
+    miscarriage_number: Optional[int] = 0  # Riwayat keguguran
+    previous_pregnancy_complications: Optional[str] = None  # Komplikasi kehamilan sebelumnya
+    pernah_caesar: bool = False  # Pernah Caesar
+    pernah_perdarahan_saat_hamil: bool = False  # Pernah perdarahan saat hamil
+    
+    # Riwayat Kesehatan Ibu
+    riwayat_kesehatan_ibu: RiwayatKesehatanIbu = RiwayatKesehatanIbu()
+    
+    # Kontak Darurat
     emergency_contact_name: str
     emergency_contact_phone: str
+    emergency_contact_relation: Optional[str] = None
     
     # Optional fields
     age: Optional[int] = None
     blood_type: Optional[str] = None
-    last_menstrual_period: Optional[date] = None
-    estimated_due_date: Optional[date] = None
-    pregnancy_number: Optional[int] = 1
-    birth_number: Optional[int] = 0
-    miscarriage_number: Optional[int] = 0
-    previous_pregnancy_complications: Optional[str] = None
-    kelurahan: Optional[str] = None
-    kecamatan: Optional[str] = None
-    rt_rw: Optional[str] = None
     house_photo_url: Optional[str] = None
-    emergency_contact_relation: Optional[str] = None
     height_cm: Optional[float] = None
     pre_pregnancy_weight_kg: Optional[float] = None
     medical_history: Optional[str] = None
@@ -82,21 +122,37 @@ class IbuHamilBase(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
+            "nama_lengkap": "Siti Aminah",
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
             "age": 39,
             "blood_type": "O+",
-            "last_menstrual_period": "2024-12-01",
-            "estimated_due_date": "2025-09-08",
-            "pregnancy_number": 2,
-            "birth_number": 1,
-            "miscarriage_number": 0,
-            "previous_pregnancy_complications": "None",
             "address": "Jl. Mawar No. 10, RT 02 RW 05",
+            "provinsi": "Jambi",
+            "kota_kabupaten": "Kerinci",
             "kelurahan": "Sungai Penuh",
             "kecamatan": "Pesisir Bukit",
             "rt_rw": "02/05",
             "location": (101.3912, -2.0645),
+            "last_menstrual_period": "2024-12-01",
+            "estimated_due_date": "2025-09-08",
+            "usia_kehamilan": 8,
+            "kehamilan_ke": 2,
+            "jumlah_anak": 1,
+            "jarak_kehamilan_terakhir": "2 tahun",
+            "miscarriage_number": 0,
+            "previous_pregnancy_complications": "Tidak ada",
+            "pernah_caesar": False,
+            "pernah_perdarahan_saat_hamil": False,
+            "riwayat_kesehatan_ibu": {
+                "darah_tinggi": False,
+                "diabetes": False,
+                "anemia": False,
+                "penyakit_jantung": False,
+                "asma": False,
+                "penyakit_ginjal": False,
+                "tbc_malaria": False,
+            },
             "house_photo_url": "/files/rumah_ibu.jpg",
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
@@ -125,17 +181,25 @@ class IbuHamilUpdate(BaseModel):
     """Schema for updating IbuHamil - all fields optional"""
     puskesmas_id: Optional[int] = None
     perawat_id: Optional[int] = None
+    nama_lengkap: Optional[str] = None
     nik: Optional[str] = None
     date_of_birth: Optional[date] = None
     age: Optional[int] = None
     blood_type: Optional[str] = None
     last_menstrual_period: Optional[date] = None
     estimated_due_date: Optional[date] = None
-    pregnancy_number: Optional[int] = None
-    birth_number: Optional[int] = None
+    usia_kehamilan: Optional[int] = None
+    kehamilan_ke: Optional[int] = None
+    jumlah_anak: Optional[int] = None
+    jarak_kehamilan_terakhir: Optional[str] = None
     miscarriage_number: Optional[int] = None
     previous_pregnancy_complications: Optional[str] = None
+    pernah_caesar: Optional[bool] = None
+    pernah_perdarahan_saat_hamil: Optional[bool] = None
+    riwayat_kesehatan_ibu: Optional[RiwayatKesehatanIbu] = None
     address: Optional[str] = None
+    provinsi: Optional[str] = None
+    kota_kabupaten: Optional[str] = None
     kelurahan: Optional[str] = None
     kecamatan: Optional[str] = None
     rt_rw: Optional[str] = None
@@ -209,15 +273,41 @@ class IbuHamilResponse(IbuHamilBase):
     model_config = ConfigDict(from_attributes=True, json_schema_extra={
         "example": {
             "id": 1,
-            "user_id": 20,  # Now in Response only
-            "puskesmas_id": 1,
-            "perawat_id": 1,
+            "user_id": 20,
+            "nama_lengkap": "Siti Aminah",
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
+            "puskesmas_id": 1,
+            "perawat_id": 1,
             "location": (101.3912, -2.0645),
             "address": "Jl. Mawar No. 10",
+            "provinsi": "Jambi",
+            "kota_kabupaten": "Kerinci",
+            "kelurahan": "Sungai Penuh",
+            "kecamatan": "Pesisir Bukit",
+            "rt_rw": "02/05",
+            "last_menstrual_period": "2024-12-01",
+            "estimated_due_date": "2025-09-08",
+            "usia_kehamilan": 8,
+            "kehamilan_ke": 2,
+            "jumlah_anak": 1,
+            "jarak_kehamilan_terakhir": "2 tahun",
+            "miscarriage_number": 0,
+            "previous_pregnancy_complications": "Tidak ada",
+            "pernah_caesar": False,
+            "pernah_perdarahan_saat_hamil": False,
+            "riwayat_kesehatan_ibu": {
+                "darah_tinggi": False,
+                "diabetes": False,
+                "anemia": False,
+                "penyakit_jantung": False,
+                "asma": False,
+                "penyakit_ginjal": False,
+                "tbc_malaria": False,
+            },
             "emergency_contact_name": "Budi",
             "emergency_contact_phone": "+6281234567890",
+            "emergency_contact_relation": "Suami",
             "assigned_by_user_id": 10,
             "assignment_date": "2025-01-01T10:00:00Z",
             "assignment_distance_km": 2.5,

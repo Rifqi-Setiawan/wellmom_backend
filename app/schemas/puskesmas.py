@@ -202,6 +202,8 @@ class PuskesmasUpdate(BaseModel):
 	max_patients: Optional[int] = None
 	current_patients: Optional[int] = None
 	is_active: Optional[bool] = None
+	suspension_reason: Optional[str] = None
+	suspended_at: Optional[datetime] = None
 
 	@field_validator("phone")
 	@classmethod
@@ -247,6 +249,8 @@ class PuskesmasResponse(PuskesmasBase):
 	approved_by_admin_id: Optional[int] = None
 	approved_at: Optional[datetime] = None
 	rejection_reason: Optional[str] = None
+	suspension_reason: Optional[str] = None
+	suspended_at: Optional[datetime] = None
 	is_active: bool
 	created_at: datetime
 	updated_at: datetime
@@ -260,6 +264,8 @@ class PuskesmasResponse(PuskesmasBase):
 			"approved_by_admin_id": None,
 			"approved_at": None,
 			"rejection_reason": None,
+			"suspension_reason": None,
+			"suspended_at": None,
 			"is_active": False,
 			"created_at": "2025-01-01T10:00:00Z",
 			"updated_at": "2025-01-02T11:00:00Z",
@@ -276,11 +282,15 @@ class PuskesmasResponse(PuskesmasBase):
 
 class PuskesmasAdminResponse(PuskesmasResponse):
 	admin_notes: Optional[str] = None
+	active_ibu_hamil_count: int = 0
+	active_perawat_count: int = 0
 
 	model_config = ConfigDict(from_attributes=True, json_schema_extra={
 		"example": {
 			**PuskesmasResponse.model_config.get("json_schema_extra", {}).get("example", {}),
 			"admin_notes": "Perlu verifikasi ulang dokumen izin operasional.",
+			"active_ibu_hamil_count": 120,
+			"active_perawat_count": 18,
 		}
 	})
 

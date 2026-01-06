@@ -1,15 +1,32 @@
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text  # ✅ ADD THIS
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db, engine
+from app.api.v1.api import api_router
 
 # Create FastAPI app
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
+
+# CORS (development: allow all)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include versioned API router
+app.include_router(api_router)
 
 # Root endpoint
 @app.get("/")

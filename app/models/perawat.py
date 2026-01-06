@@ -1,7 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from geoalchemy2 import Geography
 from ..database import Base
 
 
@@ -25,9 +24,7 @@ class Perawat(Base):
     max_patients = Column(Integer, default=15)
     current_patients = Column(Integer, default=0)
     
-    # Work Area & Location
-    work_area = Column(String(200))
-    location = Column(Geography(geometry_type='POINT', srid=4326))
+    # Work Area & Location removed per FR (use Puskesmas location only)
     
     # Status
     is_available = Column(Boolean, default=True, index=True)

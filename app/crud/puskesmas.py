@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.crud.base import CRUDBase
 from app.models.puskesmas import Puskesmas
+from app.models.ibu_hamil import IbuHamil
+from app.models.perawat import Perawat
 from app.schemas.puskesmas import PuskesmasCreate, PuskesmasUpdate
 
 
@@ -85,6 +87,54 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
             raise
         return puskesmas
 
+    def suspend(
+        self, db: Session, *, puskesmas_id: int, admin_id: int, reason: str
+    ) -> Optional[Puskesmas]:
+        """Suspend an active Puskesmas with admin-provided reason."""
+        puskesmas = self.get(db, puskesmas_id)
+        if not puskesmas:
+            return None
+
+        puskesmas.registration_status = "suspended"
+        puskesmas.is_active = False
+        puskesmas.suspension_reason = reason
+        puskesmas.suspended_at = datetime.utcnow()
+        puskesmas.approved_by_admin_id = admin_id
+
+        try:
+            db.add(puskesmas)
+            db.commit()
+            db.refresh(puskesmas)
+        except Exception:
+            db.rollback()
+            raise
+        return puskesmas
+
+    def reinstate(
+        self, db: Session, *, puskesmas_id: int, admin_id: int
+    ) -> Optional[Puskesmas]:
+        """Reinstate a suspended Puskesmas back to approved & active."""
+        puskesmas = self.get(db, puskesmas_id)
+        if not puskesmas:
+            return None
+
+        puskesmas.registration_status = "approved"
+        puskesmas.is_active = True
+        puskesmas.suspension_reason = None
+        puskesmas.suspended_at = None
+        puskesmas.rejection_reason = None
+        puskesmas.approved_by_admin_id = admin_id
+        puskesmas.approved_at = datetime.utcnow()
+
+        try:
+            db.add(puskesmas)
+            db.commit()
+            db.refresh(puskesmas)
+        except Exception:
+            db.rollback()
+            raise
+        return puskesmas
+
     def get_by_status(self, db: Session, *, status: str) -> List[Puskesmas]:
         """Get Puskesmas filtered by registration status."""
         stmt = select(Puskesmas).where(Puskesmas.registration_status == status)
@@ -94,6 +144,69 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         """Get only active Puskesmas."""
         stmt = select(Puskesmas).where(Puskesmas.is_active == True)
         return db.scalars(stmt).all()
+
+    def get_active_with_stats(self, db: Session) -> List[tuple[Puskesmas, int, int]]:
+        """Return active & approved puskesmas with counts of active ibu hamil and perawat."""
+        ibu_counts = (
+            select(IbuHamil.puskesmas_id, func.count(IbuHamil.id).label("ibu_count"))
+            .where(IbuHamil.is_active == True)
+            .group_by(IbuHamil.puskesmas_id)
+            .subquery()
+        )
+
+        perawat_counts = (
+            select(Perawat.puskesmas_id, func.count(Perawat.id).label("perawat_count"))
+            .where(Perawat.is_active == True)
+            .group_by(Perawat.puskesmas_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                Puskesmas,
+                func.coalesce(ibu_counts.c.ibu_count, 0).label("active_ibu_hamil_count"),
+                func.coalesce(perawat_counts.c.perawat_count, 0).label("active_perawat_count"),
+            )
+            .outerjoin(ibu_counts, ibu_counts.c.puskesmas_id == Puskesmas.id)
+            .outerjoin(perawat_counts, perawat_counts.c.puskesmas_id == Puskesmas.id)
+            .where(Puskesmas.registration_status == "approved")
+            .where(Puskesmas.is_active == True)
+        )
+        return db.execute(stmt).all()
+
+    def get_with_stats(
+        self, db: Session, *, puskesmas_id: int
+    ) -> Optional[tuple[Puskesmas, int, int]]:
+        """Get single puskesmas with aggregated active ibu hamil and perawat counts."""
+        ibu_counts = (
+            select(IbuHamil.puskesmas_id, func.count(IbuHamil.id).label("ibu_count"))
+            .where(IbuHamil.is_active == True)
+            .group_by(IbuHamil.puskesmas_id)
+            .subquery()
+        )
+
+        perawat_counts = (
+            select(Perawat.puskesmas_id, func.count(Perawat.id).label("perawat_count"))
+            .where(Perawat.is_active == True)
+            .group_by(Perawat.puskesmas_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                Puskesmas,
+                func.coalesce(ibu_counts.c.ibu_count, 0).label("active_ibu_hamil_count"),
+                func.coalesce(perawat_counts.c.perawat_count, 0).label("active_perawat_count"),
+            )
+            .outerjoin(ibu_counts, ibu_counts.c.puskesmas_id == Puskesmas.id)
+            .outerjoin(perawat_counts, perawat_counts.c.puskesmas_id == Puskesmas.id)
+            .where(Puskesmas.id == puskesmas_id)
+        )
+
+        result = db.execute(stmt).first()
+        if not result:
+            return None
+        return result
 
     def find_nearest(
         self, db: Session, *, latitude: float, longitude: float, radius_km: float = 10.0
@@ -119,6 +232,11 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         
         results = db.execute(stmt).all()
         return [(row[0], row[1]) for row in results]
+
+    def get_by_admin_user_id(self, db: Session, *, admin_user_id: int) -> Optional[Puskesmas]:
+        """Find puskesmas owned by a specific admin user."""
+        stmt = select(Puskesmas).where(Puskesmas.admin_user_id == admin_user_id).limit(1)
+        return db.scalars(stmt).first()
 
     def update_capacity(
         self, db: Session, *, puskesmas_id: int, increment: int
