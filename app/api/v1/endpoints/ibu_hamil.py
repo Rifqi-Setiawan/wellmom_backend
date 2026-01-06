@@ -36,6 +36,62 @@ class IbuHamilRegisterRequest(BaseModel):
 
     user: UserCreate
     ibu_hamil: IbuHamilCreate
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "user": {
+                "email": "siti.aminah@example.com",
+                "phone": "+6281234567890",
+                "password": "SecurePassword123!",
+                "full_name": "Siti Aminah",
+                "role": "ibu_hamil"
+            },
+            "ibu_hamil": {
+                "nama_lengkap": "Siti Aminah",
+                "nik": "3175091201850001",
+                "date_of_birth": "1985-12-12",
+                "address": "Jl. Mawar No. 10, RT 02 RW 05, Kelurahan Sungai Penuh",
+                "location": [101.3912, -2.0645],
+                "provinsi": "Jambi",
+                "kota_kabupaten": "Kerinci",
+                "kelurahan": "Sungai Penuh",
+                "kecamatan": "Pesisir Bukit",
+                "rt_rw": "02/05",
+                "emergency_contact_name": "Budi (Suami)",
+                "emergency_contact_phone": "+6281298765432",
+                "emergency_contact_relation": "Suami",
+                "last_menstrual_period": "2024-12-01",
+                "estimated_due_date": "2025-09-08",
+                "usia_kehamilan": 8,
+                "kehamilan_ke": 2,
+                "jumlah_anak": 1,
+                "jarak_kehamilan_terakhir": "2 tahun",
+                "miscarriage_number": 0,
+                "previous_pregnancy_complications": "Tidak ada",
+                "pernah_caesar": False,
+                "pernah_perdarahan_saat_hamil": False,
+                "riwayat_kesehatan_ibu": {
+                    "darah_tinggi": False,
+                    "diabetes": False,
+                    "anemia": False,
+                    "penyakit_jantung": False,
+                    "asma": False,
+                    "penyakit_ginjal": False,
+                    "tbc_malaria": False
+                },
+                "age": 39,
+                "blood_type": "O+",
+                "height_cm": 158.0,
+                "pre_pregnancy_weight_kg": 55.0,
+                "medical_history": "Tidak ada penyakit kronis",
+                "current_medications": "Multivitamin prenatal",
+                "risk_level": "normal",
+                "healthcare_preference": "puskesmas",
+                "whatsapp_consent": True,
+                "data_sharing_consent": False
+            }
+        }
+    })
 
 
 class AssignRequest(BaseModel):

@@ -1,9 +1,11 @@
 """Pydantic schemas for `IbuHamil` (Pregnant Woman) domain objects."""
 
 from datetime import date, datetime
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from geoalchemy2.elements import WKBElement
+from shapely import wkb
 
 
 RISK_LEVELS = {"low", "normal", "high"}
@@ -270,6 +272,30 @@ class IbuHamilResponse(IbuHamilBase):
     is_active: bool = True
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer('location')
+    def serialize_location(self, location: Any, _info) -> Optional[Tuple[float, float]]:
+        """Convert PostGIS Geography POINT to (longitude, latitude) tuple"""
+        if location is None:
+            return None
+        
+        # If already a tuple (from schema), return as-is
+        if isinstance(location, tuple):
+            return location
+        
+        # If WKBElement (from PostGIS), parse it
+        if isinstance(location, WKBElement):
+            point = wkb.loads(bytes(location.data))
+            return (point.x, point.y)  # (longitude, latitude)
+        
+        # If string (WKT format like 'POINT(101.3912 -2.0645)')
+        if isinstance(location, str):
+            import re
+            match = re.match(r'POINT\(([0-9.\-]+)\s+([0-9.\-]+)\)', location)
+            if match:
+                return (float(match.group(1)), float(match.group(2)))
+        
+        return None
 
     model_config = ConfigDict(from_attributes=True, json_schema_extra={
         "example": {
