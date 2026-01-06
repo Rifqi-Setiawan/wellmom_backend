@@ -24,7 +24,6 @@ from app.crud import crud_user, crud_perawat, crud_puskesmas
 from app.models.user import User
 from app.models.perawat import Perawat as PerawatModel
 from app.schemas.perawat import PerawatRegisterWithUser, PerawatResponse
-from app.schemas.perawat import PerawatCreate
 from app.schemas.user import UserCreate
 from app.services.email import EmailNotConfigured, send_email
 from app.utils.file_handler import save_profile_photo
@@ -129,8 +128,6 @@ def generate_perawat_account(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone already registered")
     if crud_user.get_by_email(db, email=payload.email):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-    if crud_perawat.get_by_nip(db, nip=payload.nip):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="NIP already registered")
 
     # Create user with temporary password; mark inactive until activation
     temp_password = secrets.token_urlsafe(8)
@@ -150,25 +147,8 @@ def generate_perawat_account(
     db.commit()
     db.refresh(user)
 
-    # Create perawat profile
-    perawat = crud_perawat.create(
-        db,
-        obj_in=PerawatCreate(
-            user_id=user.id,
-            puskesmas_id=puskesmas.id,
-            created_by_user_id=current_user.id,
-            nik=payload.nik,
-            nip=payload.nip,
-            job_title=payload.job_title,
-            license_number=payload.license_number,
-            max_patients=payload.max_patients,
-        ),
-    )
-    perawat.is_active = False
-    perawat.is_available = False
-    db.add(perawat)
-    db.commit()
-    db.refresh(perawat)
+    # Defer perawat profile creation until after login.
+    # Only user account is generated at this step.
 
     token = crud_user.create_verification_token(db, user_id=user.id)
     if not token:
@@ -184,15 +164,14 @@ def generate_perawat_account(
 
     activation_link = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/perawat/activate?token={token}"
 
-    # Enrich perawat object for response schema (joined fields)
-    perawat.full_name = user.full_name  # type: ignore[attr-defined]
-    perawat.phone = user.phone  # type: ignore[attr-defined]
-    perawat.email = user.email  # type: ignore[attr-defined]
-    perawat.is_verified = False  # type: ignore[attr-defined]
-
     return {
-        "perawat": PerawatResponse.from_orm(perawat),
+        "user_id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "phone": user.phone,
+        "role": user.role,
         "activation_link": activation_link,
+        "message": "Perawat user generated. Complete profile after activation.",
     }
 
 

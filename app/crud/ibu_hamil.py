@@ -40,6 +40,8 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         """
         # Convert Pydantic model to dict (exclude location tuple)
         obj_data = obj_in.model_dump(exclude={"location"})
+        # Ensure profile photo is not set during registration
+        obj_data.pop("profile_photo_url", None)
 
         # Flatten nested riwayat_kesehatan_ibu -> individual boolean columns
         riwayat = obj_data.pop("riwayat_kesehatan_ibu", None) or {}

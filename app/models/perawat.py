@@ -18,7 +18,7 @@ class Perawat(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     nomor_hp = Column(String(20), nullable=False)
     nip = Column(String(50), unique=True, nullable=False, index=True)
-    profile_photo_url = Column(String(500), nullable=True)  # Foto profil
+    profile_photo_url = Column(String(500), nullable=True)
     
     # Status Akun
     is_active = Column(Boolean, default=True, index=True)

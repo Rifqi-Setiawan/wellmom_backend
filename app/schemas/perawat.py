@@ -62,7 +62,7 @@ class PerawatRegisterWithUser(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=255)
     
     # Perawat fields
-    nip: str = Field(..., min_length=5, max_length=50)
+    nip: Optional[str] = Field(None, min_length=5, max_length=50)
     nik: Optional[str] = Field(None, min_length=16, max_length=16)
     job_title: Optional[str] = Field(None, max_length=100)
     license_number: Optional[str] = Field(None, max_length=50)
@@ -81,11 +81,10 @@ class PerawatRegisterWithUser(BaseModel):
             "phone": "+6281234567890",
             "email": "siti@example.com",
             "full_name": "Siti Nurhaliza",
-            "nip": "198501012015011001",
             "nik": "3175091201850001",
             "job_title": "Bidan",
             "license_number": "BID-123456",
-            "max_patients": 15,
+            "max_patients": 15
         }
     })
 

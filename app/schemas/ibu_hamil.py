@@ -94,7 +94,6 @@ class IbuHamilBase(BaseModel):
     # Optional fields
     age: Optional[int] = None
     blood_type: Optional[str] = None
-    house_photo_url: Optional[str] = None
     height_cm: Optional[float] = None
     pre_pregnancy_weight_kg: Optional[float] = None
     medical_history: Optional[str] = None
@@ -154,7 +153,6 @@ class IbuHamilBase(BaseModel):
                 "penyakit_ginjal": False,
                 "tbc_malaria": False,
             },
-            "house_photo_url": "/files/rumah_ibu.jpg",
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
             "emergency_contact_relation": "Suami",
@@ -207,7 +205,6 @@ class IbuHamilUpdate(BaseModel):
     kecamatan: Optional[str] = None
     rt_rw: Optional[str] = None
     location: Optional[Tuple[float, float]] = None
-    house_photo_url: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     emergency_contact_relation: Optional[str] = None

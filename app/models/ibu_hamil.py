@@ -44,7 +44,6 @@ class IbuHamil(Base):
     kecamatan = Column(String(100))
     rt_rw = Column(String(20))
     location = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
-    house_photo_url = Column(String(500))
     
     # Kontak Darurat
     emergency_contact_name = Column(String(255), nullable=False)
