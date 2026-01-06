@@ -25,10 +25,6 @@ class RejectionReason(BaseModel):
     rejection_reason: str
 
 
-class SuspensionReason(BaseModel):
-    reason: str
-
-
 class NearestPuskesmasResponse(BaseModel):
     puskesmas: PuskesmasResponse
     distance_km: float
@@ -38,7 +34,6 @@ class NearestPuskesmasResponse(BaseModel):
             "puskesmas": {
                 "id": 1,
                 "name": "Puskesmas Sungai Penuh",
-                "code": "PKM-ABC-123",
                 "registration_status": "approved",
                 "is_active": True,
             },
@@ -76,18 +71,28 @@ async def register_puskesmas(
             detail="Phone already registered",
         )
 
-    # Create associated user (temporary password uses kepala_nik)
+    # Create associated user (temporary password uses kepala_nip)
     user_data = UserCreate(
         phone=puskesmas_in.phone,
-        password=puskesmas_in.kepala_nik,
+        password=puskesmas_in.kepala_nip,
         full_name=puskesmas_in.kepala_name,
         role="puskesmas",
         email=puskesmas_in.email,
     )
     db_user = crud_user.create_user(db, user_in=user_data)
 
+    # Registration status: default submit for verification unless explicitly draft
+    desired_status: str = puskesmas_in.registration_status or "pending_approval"
+    if desired_status == "draft":
+        desired_status = "draft"
+    else:
+        desired_status = "pending_approval"
+
     # Create puskesmas with admin_user_id linked
-    puskesmas_with_admin = puskesmas_in.model_copy(update={"admin_user_id": db_user.id})
+    puskesmas_with_admin = puskesmas_in.model_copy(update={
+        "admin_user_id": db_user.id,
+        "registration_status": desired_status,
+    })
     db_puskesmas = crud_puskesmas.create_with_location(db, puskesmas_in=puskesmas_with_admin)
 
     return {
@@ -288,80 +293,6 @@ async def reject_puskesmas(
         user_id=puskesmas.admin_user_id,
         title="Registrasi Puskesmas ditolak",
         message=f"Registrasi puskesmas {puskesmas.name} ditolak: {payload.rejection_reason}",
-        notification_type="system",
-        priority="normal",
-        sent_via="in_app",
-    )
-    crud_notification.create(db, obj_in=notification_in)
-
-    return puskesmas
-
-
-@router.post(
-    "/{puskesmas_id}/suspend",
-    response_model=PuskesmasResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Suspend active puskesmas",
-)
-async def suspend_puskesmas(
-    puskesmas_id: int,
-    payload: SuspensionReason,
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-) -> Puskesmas:
-    """Suspend an active puskesmas with reason and notify admin user."""
-    puskesmas = crud_puskesmas.suspend(
-        db,
-        puskesmas_id=puskesmas_id,
-        admin_id=current_user.id,
-        reason=payload.reason,
-    )
-    if not puskesmas:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Puskesmas not found",
-        )
-
-    notification_in = NotificationCreate(
-        user_id=puskesmas.admin_user_id,
-        title="Puskesmas disuspensi",
-        message=f"Puskesmas {puskesmas.name} disuspensi: {payload.reason}",
-        notification_type="system",
-        priority="high",
-        sent_via="in_app",
-    )
-    crud_notification.create(db, obj_in=notification_in)
-
-    return puskesmas
-
-
-@router.post(
-    "/{puskesmas_id}/reinstate",
-    response_model=PuskesmasResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Reinstate suspended puskesmas",
-)
-async def reinstate_puskesmas(
-    puskesmas_id: int,
-    current_user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-) -> Puskesmas:
-    """Reinstate a suspended puskesmas back to active/approved status."""
-    puskesmas = crud_puskesmas.reinstate(
-        db,
-        puskesmas_id=puskesmas_id,
-        admin_id=current_user.id,
-    )
-    if not puskesmas:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Puskesmas not found",
-        )
-
-    notification_in = NotificationCreate(
-        user_id=puskesmas.admin_user_id,
-        title="Puskesmas diaktifkan kembali",
-        message=f"Puskesmas {puskesmas.name} telah diaktifkan kembali.",
         notification_type="system",
         priority="normal",
         sent_via="in_app",

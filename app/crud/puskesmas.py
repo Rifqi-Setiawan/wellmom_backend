@@ -18,16 +18,14 @@ from app.schemas.puskesmas import PuskesmasCreate, PuskesmasUpdate
 
 class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
     def create_with_location(self, db: Session, *, puskesmas_in: PuskesmasCreate) -> Puskesmas:
-        """Create Puskesmas with PostGIS location from (longitude, latitude) tuple."""
+        """Create Puskesmas and fill PostGIS location from latitude/longitude."""
         puskesmas_data = puskesmas_in.model_dump(exclude_unset=True)
-        
-        # Extract and convert location tuple to PostGIS Point
-        location_tuple = puskesmas_data.pop("location", None)
-        if location_tuple:
-            lon, lat = location_tuple
-            # Create WKT point string: POINT(longitude latitude)
+
+        lat = puskesmas_data.get("latitude")
+        lon = puskesmas_data.get("longitude")
+        if lat is not None and lon is not None:
             puskesmas_data["location"] = f"POINT({lon} {lat})"
-        
+
         db_obj = Puskesmas(**puskesmas_data)
         try:
             db.add(db_obj)
@@ -40,7 +38,7 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
 
     def get_pending_registrations(self, db: Session) -> List[Puskesmas]:
         """Get all Puskesmas with pending registration status."""
-        stmt = select(Puskesmas).where(Puskesmas.registration_status == "pending")
+        stmt = select(Puskesmas).where(Puskesmas.registration_status == "pending_approval")
         return db.scalars(stmt).all()
 
     def approve(self, db: Session, *, puskesmas_id: int, admin_id: int) -> Optional[Puskesmas]:
@@ -95,46 +93,6 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         if not puskesmas:
             return None
 
-        puskesmas.registration_status = "suspended"
-        puskesmas.is_active = False
-        puskesmas.suspension_reason = reason
-        puskesmas.suspended_at = datetime.utcnow()
-        puskesmas.approved_by_admin_id = admin_id
-
-        try:
-            db.add(puskesmas)
-            db.commit()
-            db.refresh(puskesmas)
-        except Exception:
-            db.rollback()
-            raise
-        return puskesmas
-
-    def reinstate(
-        self, db: Session, *, puskesmas_id: int, admin_id: int
-    ) -> Optional[Puskesmas]:
-        """Reinstate a suspended Puskesmas back to approved & active."""
-        puskesmas = self.get(db, puskesmas_id)
-        if not puskesmas:
-            return None
-
-        puskesmas.registration_status = "approved"
-        puskesmas.is_active = True
-        puskesmas.suspension_reason = None
-        puskesmas.suspended_at = None
-        puskesmas.rejection_reason = None
-        puskesmas.approved_by_admin_id = admin_id
-        puskesmas.approved_at = datetime.utcnow()
-
-        try:
-            db.add(puskesmas)
-            db.commit()
-            db.refresh(puskesmas)
-        except Exception:
-            db.rollback()
-            raise
-        return puskesmas
-
     def get_by_status(self, db: Session, *, status: str) -> List[Puskesmas]:
         """Get Puskesmas filtered by registration status."""
         stmt = select(Puskesmas).where(Puskesmas.registration_status == status)
@@ -142,7 +100,7 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
 
     def get_active(self, db: Session) -> List[Puskesmas]:
         """Get only active Puskesmas."""
-        stmt = select(Puskesmas).where(Puskesmas.is_active == True)
+        stmt = select(Puskesmas).where(Puskesmas.is_active == True).where(Puskesmas.registration_status == "approved")
         return db.scalars(stmt).all()
 
     def get_active_with_stats(self, db: Session) -> List[tuple[Puskesmas, int, int]]:
@@ -226,6 +184,7 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         stmt = (
             select(Puskesmas, distance_km.label("distance"))
             .where(Puskesmas.is_active == True)
+            .where(Puskesmas.registration_status == "approved")
             .where(distance_km <= radius_km)
             .order_by(distance_km)
         )
@@ -237,30 +196,6 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         """Find puskesmas owned by a specific admin user."""
         stmt = select(Puskesmas).where(Puskesmas.admin_user_id == admin_user_id).limit(1)
         return db.scalars(stmt).first()
-
-    def update_capacity(
-        self, db: Session, *, puskesmas_id: int, increment: int
-    ) -> Optional[Puskesmas]:
-        """Adjust current_patients count.
-        
-        Use positive increment to add patients, negative to reduce.
-        """
-        puskesmas = self.get(db, puskesmas_id)
-        if not puskesmas:
-            return None
-        
-        new_count = (puskesmas.current_patients or 0) + increment
-        # Ensure it doesn't go below 0
-        puskesmas.current_patients = max(0, new_count)
-        
-        try:
-            db.add(puskesmas)
-            db.commit()
-            db.refresh(puskesmas)
-        except Exception:
-            db.rollback()
-            raise
-        return puskesmas
 
 
 # Singleton instance
