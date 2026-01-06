@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.orm import Session
 
 from app.crud.base import CRUDBase
 from app.models.perawat import Perawat
+from app.models.ibu_hamil import IbuHamil
 from app.schemas.perawat import PerawatCreate, PerawatUpdate
 
 
@@ -18,57 +19,68 @@ class CRUDPerawat(CRUDBase[Perawat, PerawatCreate, PerawatUpdate]):
         stmt = select(Perawat).where(Perawat.puskesmas_id == puskesmas_id)
         return db.scalars(stmt).all()
 
-    def get_available(self, db: Session, *, puskesmas_id: Optional[int] = None) -> List[Perawat]:
-        """Get available Perawat (is_available=True and has capacity)."""
-        conditions = [
-            Perawat.is_available == True,
-            Perawat.is_active == True,
-            Perawat.current_patients < Perawat.max_patients,
-        ]
-        
-        if puskesmas_id is not None:
-            conditions.append(Perawat.puskesmas_id == puskesmas_id)
-        
-        stmt = select(Perawat).where(and_(*conditions))
+    def get_active_by_puskesmas(self, db: Session, *, puskesmas_id: int) -> List[Perawat]:
+        """Get all active Perawat in a specific Puskesmas."""
+        stmt = select(Perawat).where(
+            and_(
+                Perawat.puskesmas_id == puskesmas_id,
+                Perawat.is_active == True
+            )
+        )
         return db.scalars(stmt).all()
 
-    def update_workload(
-        self, db: Session, *, perawat_id: int, increment: int
-    ) -> Optional[Perawat]:
-        """Adjust current_patients count.
+    def get_by_nip(self, db: Session, *, nip: str) -> Optional[Perawat]:
+        """Get Perawat by NIP."""
+        stmt = select(Perawat).where(Perawat.nip == nip).limit(1)
+        return db.scalars(stmt).first()
+
+    def get_by_email(self, db: Session, *, email: str) -> Optional[Perawat]:
+        """Get Perawat by email."""
+        stmt = select(Perawat).where(Perawat.email == email).limit(1)
+        return db.scalars(stmt).first()
+
+    def get_with_patient_count(self, db: Session, *, perawat_id: int) -> Optional[dict]:
+        """Get Perawat with patient count."""
+        perawat = self.get(db, perawat_id)
+        if not perawat:
+            return None
         
-        Use positive increment to add patients, negative to reduce.
+        # Count ibu hamil assigned to this perawat
+        patient_count = db.scalar(
+            select(func.count(IbuHamil.id)).where(IbuHamil.perawat_id == perawat_id)
+        ) or 0
+        
+        return {
+            "perawat": perawat,
+            "jumlah_ibu_hamil": patient_count
+        }
+
+    def assign_patient(
+        self, db: Session, *, perawat_id: int, ibu_hamil_id: int
+    ) -> Optional[Perawat]:
+        """Assign an Ibu Hamil to this Perawat.
+        
+        Note: This updates the IbuHamil.perawat_id field.
         """
         perawat = self.get(db, perawat_id)
         if not perawat:
             return None
         
-        new_count = (perawat.current_patients or 0) + increment
-        # Ensure it doesn't go below 0 or exceed max_patients
-        perawat.current_patients = max(0, min(new_count, perawat.max_patients))
+        # Update IbuHamil record
+        ibu_hamil = db.get(IbuHamil, ibu_hamil_id)
+        if not ibu_hamil:
+            return None
+        
+        ibu_hamil.perawat_id = perawat_id
         
         try:
-            db.add(perawat)
+            db.add(ibu_hamil)
             db.commit()
             db.refresh(perawat)
         except Exception:
             db.rollback()
             raise
         return perawat
-
-    def get_by_nip(self, db: Session, *, nip: str) -> Optional[Perawat]:
-        stmt = select(Perawat).where(Perawat.nip == nip).limit(1)
-        return db.scalars(stmt).first()
-
-    def assign_patient(
-        self, db: Session, *, perawat_id: int, ibu_hamil_id: int
-    ) -> Optional[Perawat]:
-        """Assign an Ibu Hamil to this Perawat by incrementing workload.
-        
-        Note: This only updates the Perawat side. Caller should also update
-        the IbuHamil.perawat_id field separately.
-        """
-        return self.update_workload(db, perawat_id=perawat_id, increment=1)
 
 
 # Singleton instance

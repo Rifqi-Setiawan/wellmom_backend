@@ -92,5 +92,5 @@ class IbuHamil(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     puskesmas = relationship("Puskesmas", foreign_keys=[puskesmas_id])
-    perawat = relationship("Perawat", foreign_keys=[perawat_id])
+    perawat = relationship("Perawat", back_populates="ibu_hamil_list", foreign_keys=[perawat_id])
     assigned_by = relationship("User", foreign_keys=[assigned_by_user_id])

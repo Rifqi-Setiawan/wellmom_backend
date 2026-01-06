@@ -94,3 +94,4 @@ class Puskesmas(Base):
     # Relationships
     admin_user = relationship("User", foreign_keys=[admin_user_id])
     approved_by = relationship("User", foreign_keys=[approved_by_admin_id])
+    perawat_list = relationship("Perawat", back_populates="puskesmas")

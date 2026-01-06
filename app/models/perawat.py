@@ -10,24 +10,15 @@ class Perawat(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Foreign Keys
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     puskesmas_id = Column(Integer, ForeignKey("puskesmas.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     
-    # Professional Info
-    nip = Column(String(50), unique=True, nullable=False)
-    job_title = Column(String(100), nullable=False)
-    license_number = Column(String(100))
-    license_document_url = Column(String(500))
+    # Data Perawat
+    nama_lengkap = Column(String(255), nullable=False)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    nomor_hp = Column(String(20), nullable=False)
+    nip = Column(String(50), unique=True, nullable=False, index=True)
     
-    # Workload Management
-    max_patients = Column(Integer, default=15)
-    current_patients = Column(Integer, default=0)
-    
-    # Work Area & Location removed per FR (use Puskesmas location only)
-    
-    # Status
-    is_available = Column(Boolean, default=True, index=True)
+    # Status Akun
     is_active = Column(Boolean, default=True, index=True)
     
     # Timestamps
@@ -35,6 +26,5 @@ class Perawat(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     
     # Relationships
-    user = relationship("User", foreign_keys=[user_id])
-    puskesmas = relationship("Puskesmas", foreign_keys=[puskesmas_id])
-    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    puskesmas = relationship("Puskesmas", back_populates="perawat_list")
+    ibu_hamil_list = relationship("IbuHamil", back_populates="perawat")
