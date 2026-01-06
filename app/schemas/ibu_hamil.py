@@ -60,6 +60,7 @@ class IbuHamilBase(BaseModel):
     nama_lengkap: str
     nik: str
     date_of_birth: date
+    profile_photo_url: Optional[str] = None  # Foto profil ibu hamil
     
     # Alamat & Lokasi
     address: str
@@ -181,11 +182,13 @@ class IbuHamilUpdate(BaseModel):
     """Schema for updating IbuHamil - all fields optional"""
     puskesmas_id: Optional[int] = None
     perawat_id: Optional[int] = None
+    assigned_by_user_id: Optional[int] = None
     nama_lengkap: Optional[str] = None
     nik: Optional[str] = None
     date_of_birth: Optional[date] = None
     age: Optional[int] = None
     blood_type: Optional[str] = None
+    profile_photo_url: Optional[str] = None
     last_menstrual_period: Optional[date] = None
     estimated_due_date: Optional[date] = None
     usia_kehamilan: Optional[int] = None
@@ -217,6 +220,7 @@ class IbuHamilUpdate(BaseModel):
     whatsapp_consent: Optional[bool] = None
     data_sharing_consent: Optional[bool] = None
     is_active: Optional[bool] = None
+    assignment_date: Optional[datetime] = None
     assignment_distance_km: Optional[float] = None
     assignment_method: Optional[str] = None
 
@@ -277,41 +281,12 @@ class IbuHamilResponse(IbuHamilBase):
             "nama_lengkap": "Siti Aminah",
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
+            "profile_photo_url": "/photos/ibu_hamil/1.jpg",
             "puskesmas_id": 1,
             "perawat_id": 1,
             "location": (101.3912, -2.0645),
             "address": "Jl. Mawar No. 10",
             "provinsi": "Jambi",
-            "kota_kabupaten": "Kerinci",
-            "kelurahan": "Sungai Penuh",
-            "kecamatan": "Pesisir Bukit",
-            "rt_rw": "02/05",
-            "last_menstrual_period": "2024-12-01",
-            "estimated_due_date": "2025-09-08",
-            "usia_kehamilan": 8,
-            "kehamilan_ke": 2,
-            "jumlah_anak": 1,
-            "jarak_kehamilan_terakhir": "2 tahun",
-            "miscarriage_number": 0,
-            "previous_pregnancy_complications": "Tidak ada",
-            "pernah_caesar": False,
-            "pernah_perdarahan_saat_hamil": False,
-            "riwayat_kesehatan_ibu": {
-                "darah_tinggi": False,
-                "diabetes": False,
-                "anemia": False,
-                "penyakit_jantung": False,
-                "asma": False,
-                "penyakit_ginjal": False,
-                "tbc_malaria": False,
-            },
-            "emergency_contact_name": "Budi",
-            "emergency_contact_phone": "+6281234567890",
-            "emergency_contact_relation": "Suami",
-            "assigned_by_user_id": 10,
-            "assignment_date": "2025-01-01T10:00:00Z",
-            "assignment_distance_km": 2.5,
-            "assignment_method": "auto",
             "created_at": "2025-01-01T10:00:00Z",
             "updated_at": "2025-01-02T11:00:00Z",
         }

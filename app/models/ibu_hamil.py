@@ -22,6 +22,7 @@ class IbuHamil(Base):
     date_of_birth = Column(Date, nullable=False)
     age = Column(Integer)
     blood_type = Column(String(5))
+    profile_photo_url = Column(String(500), nullable=True)  # Foto profil
     
     # Data Kehamilan
     last_menstrual_period = Column(Date)  # HPHT

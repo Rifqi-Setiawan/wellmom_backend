@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.schemas.ibu_hamil import IbuHamilCreate, IbuHamilResponse, IbuHamilUpda
 from app.schemas.notification import NotificationCreate
 from app.schemas.puskesmas import PuskesmasResponse
 from app.schemas.user import UserCreate, UserResponse
+from app.utils.file_handler import save_profile_photo
 
 router = APIRouter(
     prefix="/ibu-hamil",
@@ -538,6 +539,117 @@ async def list_by_perawat(
             )
 
     return crud_ibu_hamil.get_by_perawat(db, perawat_id=perawat_id)
+
+
+@router.post(
+    "/{ibu_hamil_id}/profile-photo",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload ibu hamil profile photo",
+)
+async def upload_profile_photo(
+    ibu_hamil_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    """Upload profile photo for an ibu hamil.
+    
+    Only the ibu hamil themselves (via their user account) or admin can upload their photo.
+    Supported formats: JPG, PNG, GIF (max 5MB).
+    """
+    ibu_hamil = crud_ibu_hamil.get(db, ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu Hamil not found",
+        )
+    
+    # Authorization: only the ibu hamil (via their user) or admin can upload their photo
+    if current_user.role == "ibu_hamil" and ibu_hamil.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot upload photo for another ibu hamil",
+        )
+    
+    try:
+        # Save file and get path
+        photo_path = await save_profile_photo(file, "ibu_hamil", ibu_hamil_id)
+        
+        # Update ibu hamil record
+        ibu_hamil_update_data = {"profile_photo_url": photo_path}
+        ibu_hamil = crud_ibu_hamil.update(db, db_obj=ibu_hamil, obj_in=ibu_hamil_update_data)
+        
+        return ibu_hamil
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload photo: {str(e)}",
+        )
+
+
+@router.get(
+    "/{ibu_hamil_id}/profile-photo",
+    status_code=status.HTTP_200_OK,
+    summary="Get ibu hamil profile photo URL",
+)
+def get_profile_photo_url(
+    ibu_hamil_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get profile photo URL for an ibu hamil."""
+    ibu_hamil = crud_ibu_hamil.get(db, ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu Hamil not found",
+        )
+    
+    if not ibu_hamil.profile_photo_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile photo not found",
+        )
+    
+    return {
+        "ibu_hamil_id": ibu_hamil_id,
+        "profile_photo_url": ibu_hamil.profile_photo_url,
+    }
+
+
+@router.delete(
+    "/{ibu_hamil_id}/profile-photo",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete ibu hamil profile photo",
+)
+def delete_profile_photo(
+    ibu_hamil_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete profile photo for an ibu hamil."""
+    ibu_hamil = crud_ibu_hamil.get(db, ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu Hamil not found",
+        )
+    
+    # Authorization: only the ibu hamil (via their user) or admin can delete their photo
+    if current_user.role == "ibu_hamil" and ibu_hamil.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete photo for another ibu hamil",
+        )
+    
+    # Clear photo URL
+    ibu_hamil_update = {"profile_photo_url": None}
+    crud_ibu_hamil.update(db, db_obj=ibu_hamil, obj_in=ibu_hamil_update)
 
 
 __all__ = ["router"]

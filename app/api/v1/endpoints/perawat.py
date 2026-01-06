@@ -12,8 +12,9 @@ Notes:
 """
 
 import secrets
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from app.schemas.perawat import PerawatRegisterWithUser, PerawatResponse
 from app.schemas.perawat import PerawatCreate
 from app.schemas.user import UserCreate
 from app.services.email import EmailNotConfigured, send_email
+from app.utils.file_handler import save_profile_photo
 
 router = APIRouter(
     prefix="/perawat",
@@ -304,19 +306,129 @@ def accept_terms(payload: AcceptTermsPayload, db: Session = Depends(get_db)) -> 
     return {"message": "Account activated", "user_id": user.id, "perawat_id": getattr(perawat, "id", None)}
 
 
-@router.get(
-    "/me",
+@router.post(
+    "/{perawat_id}/profile-photo",
     response_model=PerawatResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get current perawat profile",
+    summary="Upload perawat profile photo",
 )
-def get_me(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)) -> PerawatModel:
-    if current_user.role != "perawat":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a perawat user")
-    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+async def upload_profile_photo(
+    perawat_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PerawatModel:
+    """Upload profile photo for a perawat.
+    
+    Only the perawat themselves or admin can upload their photo.
+    Supported formats: JPG, PNG, GIF (max 5MB).
+    """
+    perawat = crud_perawat.get(db, perawat_id)
     if not perawat:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perawat profile not found")
-    return perawat
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat not found",
+        )
+    
+    # Authorization: only the perawat or admin can upload their photo
+    if current_user.role == "perawat" and perawat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot upload photo for another perawat",
+        )
+    
+    try:
+        # Save file and get path
+        photo_path = await save_profile_photo(file, "perawat", perawat_id)
+        
+        # Update perawat record
+        perawat_update_data = {"profile_photo_url": photo_path}
+        perawat = crud_perawat.update(db, db_obj=perawat, obj_in=perawat_update_data)
+        
+        return perawat
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload photo: {str(e)}",
+        )
 
 
-__all__ = ["router"]
+@router.get(
+    "/{perawat_id}/profile-photo",
+    status_code=status.HTTP_200_OK,
+    summary="Get perawat profile photo URL",
+)
+def get_profile_photo_url(
+    perawat_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Get profile photo URL for a perawat."""
+    perawat = crud_perawat.get(db, perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat not found",
+        )
+    
+    if not perawat.profile_photo_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile photo not found",
+        )
+    
+    return {
+        "perawat_id": perawat_id,
+        "profile_photo_url": perawat.profile_photo_url,
+    }
+
+
+@router.delete(
+    "/{perawat_id}/profile-photo",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete perawat profile photo",
+)
+def delete_profile_photo(
+    perawat_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete profile photo for a perawat."""
+    perawat = crud_perawat.get(db, perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat not found",
+        )
+    
+    # Authorization: only the perawat themselves or admin can delete their photo
+    if current_user.role == "perawat" and perawat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete photo for another perawat",
+        )
+    
+    # Clear photo URL
+    perawat_update = {"profile_photo_url": None}
+    crud_perawat.update(db, db_obj=perawat, obj_in=perawat_update)
+
+
+@router.get(
+    "",
+    response_model=List[PerawatResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List all perawat",
+)
+def list_perawat(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+) -> List[PerawatModel]:
+    """Public list of all active perawat."""
+    return crud_perawat.get_multi(db, skip=skip, limit=limit)
+
+
