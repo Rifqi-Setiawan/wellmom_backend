@@ -38,20 +38,34 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         Returns:
             Created IbuHamil instance
         """
-        # Convert Pydantic model to dict
-        obj_data = obj_in.model_dump(exclude={'location'})
-        
+        # Convert Pydantic model to dict (exclude location tuple)
+        obj_data = obj_in.model_dump(exclude={"location"})
+
+        # Flatten nested riwayat_kesehatan_ibu -> individual boolean columns
+        riwayat = obj_data.pop("riwayat_kesehatan_ibu", None) or {}
+        obj_data.update(
+            {
+                "darah_tinggi": riwayat.get("darah_tinggi"),
+                "diabetes": riwayat.get("diabetes"),
+                "anemia": riwayat.get("anemia"),
+                "penyakit_jantung": riwayat.get("penyakit_jantung"),
+                "asma": riwayat.get("asma"),
+                "penyakit_ginjal": riwayat.get("penyakit_ginjal"),
+                "tbc_malaria": riwayat.get("tbc_malaria"),
+            }
+        )
+
         # Convert location tuple to WKT string for PostGIS
         location_wkt = None
         if obj_in.location:
             lon, lat = obj_in.location
-            location_wkt = f'POINT({lon} {lat})'
+            location_wkt = f"POINT({lon} {lat})"
         
         # Create IbuHamil instance
         db_obj = IbuHamil(
             **obj_data,
             user_id=user_id,
-            location=location_wkt  # SQLAlchemy will wrap with ST_GeogFromText
+            location=location_wkt,  
         )
         
         db.add(db_obj)
