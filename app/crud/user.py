@@ -78,6 +78,15 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             return None
         return user
 
+    def authenticate_by_email(self, db: Session, *, email: str, password: str) -> Optional[User]:
+        """Authenticate user by email and password."""
+        user = self.get_by_email(db, email)
+        if not user:
+            return None
+        if not verify_password(password, user.password_hash):
+            return None
+        return user
+
     def update_password(self, db: Session, *, user_id: int, new_password: str) -> Optional[User]:
         user = self.get(db, user_id)
         if not user:

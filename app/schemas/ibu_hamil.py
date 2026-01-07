@@ -3,13 +3,60 @@
 from datetime import date, datetime
 from typing import Any, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_serializer, field_validator
 from geoalchemy2.elements import WKBElement
 from shapely import wkb
 
 
 RISK_LEVELS = {"low", "normal", "high"}
 ASSIGNMENT_METHODS = {"auto", "manual"}
+
+
+# ============================================================================
+# LOGIN SCHEMAS
+# ============================================================================
+
+class IbuHamilLoginRequest(BaseModel):
+    """Schema untuk login ibu hamil dengan email dan password."""
+
+    email: EmailStr
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password minimal 6 karakter")
+        return v
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "siti.aminah@example.com",
+            "password": "SecurePassword123!"
+        }
+    })
+
+
+class IbuHamilLoginResponse(BaseModel):
+    """Schema untuk response login ibu hamil."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+    ibu_hamil_id: int
+    nama_lengkap: str
+    email: str
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "token_type": "bearer",
+            "user_id": 1,
+            "ibu_hamil_id": 1,
+            "nama_lengkap": "Siti Aminah",
+            "email": "siti.aminah@example.com"
+        }
+    })
 
 
 def _validate_nik(value: str) -> str:

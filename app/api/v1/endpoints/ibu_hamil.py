@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, require_role
 from app.core.security import create_access_token
+from app.core.exceptions import (
+    InvalidCredentialsException,
+    EmailNotFoundException,
+    AccountInactiveException,
+    NotIbuHamilException,
+    IbuHamilProfileNotFoundException,
+)
 from app.crud import (
     crud_ibu_hamil,
     crud_kerabat,
@@ -19,7 +26,13 @@ from app.crud import (
 )
 from app.models.ibu_hamil import IbuHamil
 from app.models.user import User
-from app.schemas.ibu_hamil import IbuHamilCreate, IbuHamilResponse, IbuHamilUpdate
+from app.schemas.ibu_hamil import (
+    IbuHamilCreate,
+    IbuHamilLoginRequest,
+    IbuHamilLoginResponse,
+    IbuHamilResponse,
+    IbuHamilUpdate,
+)
 from app.schemas.notification import NotificationCreate
 from app.schemas.puskesmas import PuskesmasResponse
 from app.schemas.user import UserCreate, UserResponse
@@ -459,6 +472,164 @@ async def register_ibu_hamil(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Terjadi kesalahan tidak terduga saat memproses registrasi: {str(e)}"
         )
+
+
+@router.post(
+    "/login",
+    response_model=IbuHamilLoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Login ibu hamil",
+    description="""
+Login untuk ibu hamil menggunakan email dan password.
+
+**Proses Login:**
+1. Validasi format email dan password
+2. Cek apakah email terdaftar di sistem
+3. Verifikasi password
+4. Pastikan akun aktif dan memiliki role ibu_hamil
+5. Pastikan profil ibu hamil sudah lengkap
+6. Generate access token
+
+**Catatan:**
+- Email harus terdaftar sebagai akun ibu hamil
+- Akun harus dalam status aktif
+- Profil ibu hamil harus sudah lengkap (sudah registrasi)
+""",
+    responses={
+        200: {
+            "description": "Login berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "token_type": "bearer",
+                        "user_id": 1,
+                        "ibu_hamil_id": 1,
+                        "nama_lengkap": "Siti Aminah",
+                        "email": "siti.aminah@example.com"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Email atau password salah",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Email atau password salah"}
+                }
+            }
+        },
+        403: {
+            "description": "Akun tidak aktif atau bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "inactive": {
+                            "summary": "Akun tidak aktif",
+                            "value": {"detail": "Akun tidak aktif. Silakan hubungi administrator."}
+                        },
+                        "not_ibu_hamil": {
+                            "summary": "Bukan akun ibu hamil",
+                            "value": {"detail": "Akun ini bukan akun ibu hamil. Silakan gunakan login yang sesuai."}
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Email tidak terdaftar atau profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "email_not_found": {
+                            "summary": "Email tidak terdaftar",
+                            "value": {"detail": "Email tidak terdaftar di sistem"}
+                        },
+                        "profile_not_found": {
+                            "summary": "Profil ibu hamil tidak ditemukan",
+                            "value": {"detail": "Profil ibu hamil tidak ditemukan. Silakan lengkapi registrasi terlebih dahulu."}
+                        }
+                    }
+                }
+            }
+        },
+        422: {
+            "description": "Validation error pada data input",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["body", "email"],
+                                "msg": "value is not a valid email address",
+                                "type": "value_error.email"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+)
+async def login_ibu_hamil(
+    payload: IbuHamilLoginRequest,
+    db: Session = Depends(get_db),
+) -> IbuHamilLoginResponse:
+    """
+    Login ibu hamil dengan email dan password.
+
+    Args:
+        payload: Data login (email, password)
+        db: Database session
+
+    Returns:
+        IbuHamilLoginResponse: Access token dan informasi user
+
+    Raises:
+        EmailNotFoundException: Email tidak terdaftar
+        InvalidCredentialsException: Password salah
+        AccountInactiveException: Akun tidak aktif
+        NotIbuHamilException: Akun bukan ibu hamil
+        IbuHamilProfileNotFoundException: Profil ibu hamil tidak ditemukan
+    """
+    # 1. Cek apakah email terdaftar
+    user = crud_user.get_by_email(db, email=payload.email)
+    if not user:
+        raise EmailNotFoundException()
+
+    # 2. Verifikasi password
+    authenticated_user = crud_user.authenticate_by_email(
+        db, email=payload.email, password=payload.password
+    )
+    if not authenticated_user:
+        raise InvalidCredentialsException()
+
+    # 3. Cek apakah akun aktif
+    if not authenticated_user.is_active:
+        raise AccountInactiveException()
+
+    # 4. Cek apakah role adalah ibu_hamil
+    if authenticated_user.role != "ibu_hamil":
+        raise NotIbuHamilException()
+
+    # 5. Cari profil ibu hamil
+    ibu_hamil = db.scalars(
+        select(IbuHamil).where(IbuHamil.user_id == authenticated_user.id)
+    ).first()
+    if not ibu_hamil:
+        raise IbuHamilProfileNotFoundException()
+
+    # 6. Generate access token
+    access_token = create_access_token({"sub": authenticated_user.phone})
+
+    return IbuHamilLoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user_id=authenticated_user.id,
+        ibu_hamil_id=ibu_hamil.id,
+        nama_lengkap=ibu_hamil.nama_lengkap,
+        email=authenticated_user.email,
+    )
 
 
 @router.get(
