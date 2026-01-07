@@ -138,3 +138,67 @@ class UserLogin(BaseModel):
 			"password": "StrongPass!234",
 		}
 	})
+
+
+# ============================================
+# Puskesmas Login Schemas
+# ============================================
+
+class PuskesmasLoginRequest(BaseModel):
+	"""Request body for puskesmas admin login."""
+	email: str
+	password: str
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"email": "admin@puskesmas.go.id",
+			"password": "SecurePass123!",
+		}
+	})
+
+
+class PuskesmasLoginUserInfo(BaseModel):
+	"""User information in login response."""
+	id: int
+	email: Optional[str]
+	full_name: str
+
+	model_config = ConfigDict(from_attributes=True)
+
+
+class PuskesmasLoginPuskesmasInfo(BaseModel):
+	"""Puskesmas information in login response."""
+	id: int
+	name: str
+	registration_status: str
+	is_active: bool
+
+	model_config = ConfigDict(from_attributes=True)
+
+
+class PuskesmasLoginResponse(BaseModel):
+	"""Response body for successful puskesmas admin login."""
+	access_token: str
+	token_type: str = "bearer"
+	role: str
+	user: PuskesmasLoginUserInfo
+	puskesmas: PuskesmasLoginPuskesmasInfo
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+			"token_type": "bearer",
+			"role": "puskesmas",
+			"user": {
+				"id": 15,
+				"email": "admin@puskesmas.go.id",
+				"full_name": "Admin Puskesmas Sungai Penuh"
+			},
+			"puskesmas": {
+				"id": 1,
+				"name": "Puskesmas Sungai Penuh",
+				"registration_status": "approved",
+				"is_active": True
+			}
+		}
+	})
