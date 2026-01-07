@@ -199,16 +199,5 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         stmt = select(Puskesmas).where(Puskesmas.admin_user_id == admin_user_id).limit(1)
         return db.scalars(stmt).first()
 
-    def update_capacity(self, db: Session, *, puskesmas_id: int, increment: int = 1) -> Optional[Puskesmas]:
-        puskesmas = self.get(db, puskesmas_id)
-        if not puskesmas:
-            return None
-        puskesmas.current_patients = (puskesmas.current_patients or 0) + increment
-        db.add(puskesmas)
-        db.commit()
-        db.refresh(puskesmas)
-        return puskesmas
-
-
 # Singleton instance
 crud_puskesmas = CRUDPuskesmas(Puskesmas)

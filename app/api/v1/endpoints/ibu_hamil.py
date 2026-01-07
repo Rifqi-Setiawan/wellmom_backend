@@ -216,10 +216,6 @@ def _auto_assign_nearest(
     for puskesmas, distance in nearest_list:
         if puskesmas.registration_status != "approved" or not puskesmas.is_active:
             continue
-        # Capacity check
-        if puskesmas.current_patients is not None and puskesmas.max_patients is not None:
-            if puskesmas.current_patients >= puskesmas.max_patients:
-                continue
 
         assigned_ibu = crud_ibu_hamil.assign_to_puskesmas(
             db,
@@ -227,7 +223,6 @@ def _auto_assign_nearest(
             puskesmas_id=puskesmas.id,
             distance_km=float(distance),
         )
-        crud_puskesmas.update_capacity(db, puskesmas_id=puskesmas.id, increment=1)
 
         # Pick first available perawat in that puskesmas
         perawats = crud_perawat.get_available(db, puskesmas_id=puskesmas.id)
@@ -762,21 +757,12 @@ async def assign_ibu_hamil(
             detail="Not authorized to assign for this puskesmas",
         )
 
-    # Capacity check
-    if pusk.current_patients is not None and pusk.max_patients is not None:
-        if pusk.current_patients >= pusk.max_patients:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Puskesmas capacity is full",
-            )
-
     assigned = crud_ibu_hamil.assign_to_puskesmas(
         db,
         ibu_id=ibu.id,
         puskesmas_id=pusk.id,
         distance_km=0.0,
     )
-    crud_puskesmas.update_capacity(db, puskesmas_id=pusk.id, increment=1)
 
     if payload.perawat_id:
         perawat = crud_perawat.get(db, id=payload.perawat_id)
