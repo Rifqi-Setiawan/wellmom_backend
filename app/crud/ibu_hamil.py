@@ -67,7 +67,7 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         db_obj = IbuHamil(
             **obj_data,
             user_id=user_id,
-            location=location_wkt,  
+            location=ST_GeogFromText(location_wkt) if location_wkt else None,
         )
         
         db.add(db_obj)

@@ -19,7 +19,8 @@ class Perawat(Base):
     nomor_hp = Column(String(20), nullable=False)
     nip = Column(String(50), unique=True, nullable=False, index=True)
     profile_photo_url = Column(String(500), nullable=True)
-    
+    current_patients = Column(Integer, default=0)
+
     # Status Akun
     is_active = Column(Boolean, default=True, index=True)
     

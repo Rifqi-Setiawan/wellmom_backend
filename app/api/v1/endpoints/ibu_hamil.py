@@ -251,50 +251,214 @@ def _auto_assign_nearest(
     status_code=status.HTTP_201_CREATED,
     summary="Registrasi ibu hamil",
     description="Publik atau user terautentikasi dapat mendaftarkan ibu hamil. Membuat user (role ibu_hamil) bila belum ada, lalu membuat profil ibu hamil dan auto-assign Puskesmas terdekat jika lokasi tersedia.",
+    responses={
+        201: {
+            "description": "Registrasi berhasil, user dan profil ibu hamil telah dibuat",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ibu_hamil": {"id": 1, "nama_lengkap": "Siti Aminah", "nik": "3175091201850001"},
+                        "user": {"id": 1, "phone": "+6281234567890", "full_name": "Siti Aminah"},
+                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "token_type": "bearer",
+                        "assignment": {
+                            "puskesmas": {"id": 1, "name": "Puskesmas Sungai Penuh"},
+                            "distance_km": 1.2
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Data tidak valid atau NIK sudah terdaftar",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "nik_exists": {
+                            "summary": "NIK sudah terdaftar",
+                            "value": {"detail": "NIK sudah terdaftar di sistem"}
+                        },
+                        "phone_exists": {
+                            "summary": "Nomor telepon sudah terdaftar",
+                            "value": {"detail": "Nomor telepon sudah terdaftar dengan role berbeda"}
+                        },
+                        "invalid_location": {
+                            "summary": "Koordinat lokasi tidak valid",
+                            "value": {"detail": "Koordinat lokasi harus berupa [longitude, latitude] dengan range yang valid"}
+                        }
+                    }
+                }
+            }
+        },
+        422: {
+            "description": "Validation error pada data input",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["body", "ibu_hamil", "nik"],
+                                "msg": "NIK must be exactly 16 digits",
+                                "type": "value_error"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        500: {
+            "description": "Kesalahan server internal",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Terjadi kesalahan saat memproses registrasi. Silakan coba lagi."}
+                }
+            }
+        }
+    }
 )
 async def register_ibu_hamil(
     payload: IbuHamilRegisterRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    # Ensure role is ibu_hamil
-    user_in = payload.user.model_copy(update={"role": "ibu_hamil"})
+    """
+    Registrasi ibu hamil baru dengan validasi lengkap.
+    
+    Proses registrasi:
+    1. Validasi data input (NIK, phone, location)
+    2. Cek apakah phone sudah terdaftar
+    3. Cek apakah NIK sudah terdaftar
+    4. Buat user account (jika belum ada)
+    5. Buat profil ibu hamil
+    6. Auto-assign ke Puskesmas terdekat (jika lokasi tersedia)
+    7. Generate access token
+    
+    Returns:
+        dict: User info, ibu hamil profile, access token, dan assignment info
+    
+    Raises:
+        HTTPException 400: NIK/phone sudah terdaftar atau data tidak valid
+        HTTPException 422: Validation error pada input
+        HTTPException 500: Database atau server error
+    """
+    try:
+        # Ensure role is ibu_hamil
+        user_in = payload.user.model_copy(update={"role": "ibu_hamil"})
 
-    existing_user = crud_user.get_by_phone(db, phone=user_in.phone)
-    if existing_user:
-        user_obj = existing_user
-    else:
-        user_obj = crud_user.create_user(db, user_in=user_in)
+        # Validate: Check if phone already exists with different role
+        existing_user = crud_user.get_by_phone(db, phone=user_in.phone)
+        if existing_user:
+            if existing_user.role != "ibu_hamil":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Nomor telepon sudah terdaftar dengan role {existing_user.role}. Silakan gunakan nomor lain atau login dengan akun yang ada."
+                )
+            user_obj = existing_user
+        else:
+            # Create new user
+            try:
+                user_obj = crud_user.create_user(db, user_in=user_in)
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Gagal membuat akun user: {str(e)}"
+                )
 
-    ibu_obj = crud_ibu_hamil.create_with_location(
-        db,
-        obj_in=payload.ibu_hamil,
-        user_id=user_obj.id,
-    )
+        # Validate: Check if NIK already registered
+        existing_ibu = db.query(IbuHamil).filter(IbuHamil.nik == payload.ibu_hamil.nik).first()
+        if existing_ibu:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali."
+            )
 
-    assigned_info = None
-    if payload.ibu_hamil.location:
+        # Validate location format
+        if payload.ibu_hamil.location:
+            lon, lat = payload.ibu_hamil.location
+            if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90."
+                )
+
+        # Create ibu hamil profile
         try:
-            assigned_info = _auto_assign_nearest(db, ibu_obj)
-        except HTTPException:
-            # Ignore if no available puskesmas; keep unassigned
-            assigned_info = None
+            ibu_obj = crud_ibu_hamil.create_with_location(
+                db,
+                obj_in=payload.ibu_hamil,
+                user_id=user_obj.id,
+            )
+        except ValueError as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Data tidak valid: {str(e)}"
+            )
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Gagal membuat profil ibu hamil: {str(e)}"
+            )
 
-    token = create_access_token({"sub": user_obj.phone})
+        # Auto-assign to nearest Puskesmas if location is provided
+        assigned_info = None
+        if payload.ibu_hamil.location:
+            try:
+                assigned_info = _auto_assign_nearest(db, ibu_obj)
+            except HTTPException as e:
+                # Log the assignment failure but continue (keep unassigned)
+                # User can be assigned manually later
+                assigned_info = None
+            except Exception as e:
+                # Log unexpected error but don't fail the registration
+                assigned_info = None
 
-    response = {
-        "ibu_hamil": IbuHamilResponse.from_orm(ibu_obj),
-        "user": UserResponse.from_orm(user_obj),
-        "access_token": token,
-        "token_type": "bearer",
-    }
-    if assigned_info:
-        _, puskesmas, distance = assigned_info
-        response["assignment"] = {
-            "puskesmas": PuskesmasResponse.from_orm(puskesmas),
-            "distance_km": distance,
-        }
+        # Generate access token
+        try:
+            token = create_access_token({"sub": user_obj.phone})
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Gagal membuat access token. Silakan login manual."
+            )
 
-    return response
+        # Build response
+        try:
+            response = {
+                "ibu_hamil": IbuHamilResponse.from_orm(ibu_obj),
+                "user": UserResponse.from_orm(user_obj),
+                "access_token": token,
+                "token_type": "bearer",
+            }
+            if assigned_info:
+                _, puskesmas, distance = assigned_info
+                response["assignment"] = {
+                    "puskesmas": PuskesmasResponse.from_orm(puskesmas),
+                    "distance_km": distance,
+                }
+            else:
+                response["assignment"] = None
+                response["message"] = "Registrasi berhasil. Penugasan Puskesmas akan dilakukan secara manual oleh admin."
+            
+            return response
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Gagal membentuk response: {str(e)}"
+            )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Catch any unexpected errors
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Terjadi kesalahan tidak terduga saat memproses registrasi: {str(e)}"
+        )
 
 
 @router.get(

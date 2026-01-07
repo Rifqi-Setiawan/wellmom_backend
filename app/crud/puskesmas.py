@@ -23,10 +23,12 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
 
         lat = puskesmas_data.get("latitude")
         lon = puskesmas_data.get("longitude")
+        location_geog = None
         if lat is not None and lon is not None:
-            puskesmas_data["location"] = f"POINT({lon} {lat})"
+            location_wkt = f"POINT({lon} {lat})"
+            location_geog = ST_GeogFromText(location_wkt)
 
-        db_obj = Puskesmas(**puskesmas_data)
+        db_obj = Puskesmas(**puskesmas_data, location=location_geog)
         try:
             db.add(db_obj)
             db.commit()
@@ -196,6 +198,16 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         """Find puskesmas owned by a specific admin user."""
         stmt = select(Puskesmas).where(Puskesmas.admin_user_id == admin_user_id).limit(1)
         return db.scalars(stmt).first()
+
+    def update_capacity(self, db: Session, *, puskesmas_id: int, increment: int = 1) -> Optional[Puskesmas]:
+        puskesmas = self.get(db, puskesmas_id)
+        if not puskesmas:
+            return None
+        puskesmas.current_patients = (puskesmas.current_patients or 0) + increment
+        db.add(puskesmas)
+        db.commit()
+        db.refresh(puskesmas)
+        return puskesmas
 
 
 # Singleton instance

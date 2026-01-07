@@ -28,7 +28,9 @@ class Puskesmas(Base):
     sk_document_url = Column(String(500), nullable=False)  # Upload SK Pendirian (PDF)
     npwp_document_url = Column(String(500), nullable=True)  # Upload Scan NPWP (PDF/JPG/PNG)
     building_photo_url = Column(String(500), nullable=False)  # Upload Foto Gedung (JPG/PNG)
-    
+    max_patients = Column(Integer, default=100)
+    current_patients = Column(Integer, default=0)
+
     # Geolocation
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)

@@ -82,6 +82,26 @@ class CRUDPerawat(CRUDBase[Perawat, PerawatCreate, PerawatUpdate]):
             raise
         return perawat
 
+    def get_available(self, db: Session, *, puskesmas_id: int, max_patients: int = 50) -> List[Perawat]:
+        stmt = (
+            select(Perawat)
+            .where(Perawat.puskesmas_id == puskesmas_id)
+            .where(Perawat.is_active == True)
+            .where(Perawat.current_patients < max_patients)
+            .order_by(Perawat.current_patients)
+        )
+        return db.scalars(stmt).all()
+
+    def update_workload(self, db: Session, *, perawat_id: int, increment: int = 1) -> Optional[Perawat]:
+        perawat = self.get(db, perawat_id)
+        if not perawat:
+            return None
+        perawat.current_patients = (perawat.current_patients or 0) + increment
+        db.add(perawat)
+        db.commit()
+        db.refresh(perawat)
+        return perawat
+
 
 # Singleton instance
 crud_perawat = CRUDPerawat(Perawat)
