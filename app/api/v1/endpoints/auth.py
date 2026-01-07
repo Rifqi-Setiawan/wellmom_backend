@@ -136,30 +136,123 @@ async def login(
     "/login/puskesmas",
     response_model=PuskesmasLoginResponse,
     status_code=status.HTTP_200_OK,
-    summary="Login as Puskesmas Admin",
+    summary="Login sebagai Admin Puskesmas",
+    description="""
+Login endpoint khusus untuk admin puskesmas menggunakan email dan password.
+
+## Persyaratan Login
+
+1. **User harus memiliki role `puskesmas`**
+2. **Puskesmas harus sudah disetujui** (`registration_status = 'approved'`)
+3. **Puskesmas harus aktif** (`is_active = true`)
+
+## Alur Validasi
+
+1. Validasi email dan password
+2. Cek status aktif akun user
+3. Verifikasi role user adalah 'puskesmas'
+4. Cari data puskesmas berdasarkan `admin_user_id`
+5. Cek status registrasi puskesmas
+6. Cek status aktif puskesmas
+7. Generate JWT access token
+
+## Response Sukses
+
+Mengembalikan JWT token beserta informasi user dan puskesmas.
+Token berlaku selama 30 hari.
+    """,
+    responses={
+        200: {
+            "description": "Login berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "token_type": "bearer",
+                        "role": "puskesmas",
+                        "user": {
+                            "id": 15,
+                            "email": "admin@puskesmas.go.id",
+                            "full_name": "Admin Puskesmas Sungai Penuh"
+                        },
+                        "puskesmas": {
+                            "id": 1,
+                            "name": "Puskesmas Sungai Penuh",
+                            "registration_status": "approved",
+                            "is_active": True
+                        }
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Email/password salah atau akun tidak aktif",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_credentials": {
+                            "summary": "Email atau password salah",
+                            "value": {"detail": "Email atau password salah"}
+                        },
+                        "inactive_account": {
+                            "summary": "Akun tidak aktif",
+                            "value": {"detail": "Akun pengguna tidak aktif"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Role bukan puskesmas atau puskesmas belum approved/aktif",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "wrong_role": {
+                            "summary": "Bukan akun admin puskesmas",
+                            "value": {"detail": "Akun ini bukan akun admin puskesmas"}
+                        },
+                        "draft_status": {
+                            "summary": "Registrasi belum diajukan",
+                            "value": {"detail": "Registrasi puskesmas belum diajukan"}
+                        },
+                        "pending_status": {
+                            "summary": "Menunggu persetujuan",
+                            "value": {"detail": "Registrasi puskesmas masih menunggu persetujuan"}
+                        },
+                        "rejected_status": {
+                            "summary": "Registrasi ditolak",
+                            "value": {"detail": "Registrasi puskesmas ditolak"}
+                        },
+                        "inactive_puskesmas": {
+                            "summary": "Puskesmas tidak aktif",
+                            "value": {"detail": "Puskesmas tidak aktif. Hubungi administrator untuk informasi lebih lanjut."}
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Not Found - Data puskesmas tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Data puskesmas tidak ditemukan untuk akun ini"}
+                }
+            }
+        },
+        422: {
+            "description": "Validation Error - Format request tidak valid"
+        }
+    },
 )
 async def login_puskesmas(
     login_data: PuskesmasLoginRequest,
     db: Session = Depends(get_db),
 ) -> PuskesmasLoginResponse:
     """
-    Login endpoint for Puskesmas admin users.
+    Login endpoint untuk admin puskesmas.
 
-    Only users with role 'puskesmas' can login through this endpoint.
-    The puskesmas must be approved and active.
-
-    Args:
-        login_data: Email and password credentials
-        db: Database session
-
-    Returns:
-        PuskesmasLoginResponse: Access token and puskesmas info
-
-    Raises:
-        HTTPException:
-            - 401 if email/password invalid
-            - 403 if role is not 'puskesmas' or puskesmas not approved/active
-            - 404 if no puskesmas record found for this user
+    Hanya user dengan role 'puskesmas' yang dapat login melalui endpoint ini.
+    Puskesmas harus sudah disetujui (approved) dan aktif.
     """
     # Step 1: Authenticate user by email and password
     user = crud_user.authenticate_by_email(db, email=login_data.email, password=login_data.password)
