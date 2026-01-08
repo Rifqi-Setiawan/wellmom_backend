@@ -1308,6 +1308,247 @@ Authorization: Bearer <token>
 
 ---
 
+### 12. Assign Ibu Hamil ke Puskesmas
+
+**Deskripsi Endpoint:**
+- Menugaskan satu ibu hamil ke puskesmas tertentu secara manual
+- Dapat diakses oleh admin sistem atau admin puskesmas (hanya untuk puskesmas yang dikelolanya)
+- Puskesmas harus dalam status 'approved' dan aktif
+- Setelah assign ke puskesmas, ibu hamil belum memiliki perawat yang menangani
+- Mengirim notifikasi ke user ibu hamil
+
+**Request Details:**
+
+- **HTTP Method:** POST
+- **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign`
+- **Authentication:** **Required** (Bearer Token - Admin atau Puskesmas Admin)
+- **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
+
+**Headers:**
+
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| puskesmas_id | integer | Yes | ID puskesmas tujuan |
+| ibu_id | integer | Yes | ID ibu hamil yang akan di-assign |
+
+**Example Request:**
+
+```
+POST /api/v1/puskesmas/2/ibu-hamil/1/assign
+Authorization: Bearer <token>
+```
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "id": 1,
+  "puskesmas_id": 2,
+  "perawat_id": null,
+  "user_id": 5,
+  "nama_lengkap": "Siti Aminah",
+  "nik": "3175091201850001",
+  "date_of_birth": "1985-12-12",
+  "address": "Jl. Mawar No. 10, RT 02 RW 05",
+  "provinsi": "Jambi",
+  "kota_kabupaten": "Kerinci",
+  "kelurahan": "Sungai Penuh",
+  "kecamatan": "Pesisir Bukit",
+  "location": [101.3912, -2.0645],
+  "emergency_contact_name": "Budi (Suami)",
+  "emergency_contact_phone": "+6281298765432",
+  "is_active": true,
+  "assignment_date": "2025-01-10T10:30:00Z",
+  "assignment_method": "manual"
+}
+```
+
+**Error Responses:**
+
+**Status 403 (Forbidden):**
+
+```json
+{
+  "detail": "Not authorized"
+}
+```
+
+**Status 404 (Not Found):**
+
+```json
+{
+  "detail": "Puskesmas tidak ditemukan atau belum aktif"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Ibu Hamil not found"
+}
+```
+
+---
+
+### 13. Assign Ibu Hamil ke Perawat
+
+**Deskripsi Endpoint:**
+- Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut
+- Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
+- Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
+- Perawat harus aktif dan memiliki kapasitas
+- Otomatis menambah workload perawat
+- Mengirim notifikasi ke user ibu hamil
+
+**Request Details:**
+
+- **HTTP Method:** POST
+- **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign-perawat/{perawat_id}`
+- **Authentication:** **Required** (Bearer Token - Admin atau Puskesmas Admin)
+- **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
+
+**Headers:**
+
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| puskesmas_id | integer | Yes | ID puskesmas |
+| ibu_id | integer | Yes | ID ibu hamil yang akan di-assign |
+| perawat_id | integer | Yes | ID perawat tujuan |
+
+**Example Request:**
+
+```
+POST /api/v1/puskesmas/2/ibu-hamil/1/assign-perawat/3
+Authorization: Bearer <token>
+```
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "id": 1,
+  "puskesmas_id": 2,
+  "perawat_id": 3,
+  "user_id": 5,
+  "nama_lengkap": "Siti Aminah",
+  "nik": "3175091201850001",
+  "date_of_birth": "1985-12-12",
+  "address": "Jl. Mawar No. 10, RT 02 RW 05",
+  "provinsi": "Jambi",
+  "kota_kabupaten": "Kerinci",
+  "kelurahan": "Sungai Penuh",
+  "kecamatan": "Pesisir Bukit",
+  "location": [101.3912, -2.0645],
+  "emergency_contact_name": "Budi (Suami)",
+  "emergency_contact_phone": "+6281298765432",
+  "is_active": true,
+  "assignment_date": "2025-01-10T10:30:00Z",
+  "assignment_method": "manual"
+}
+```
+
+**Error Responses:**
+
+**Status 400 (Bad Request):**
+
+```json
+{
+  "detail": "Ibu hamil belum ter-assign ke puskesmas. Silakan assign ke puskesmas terlebih dahulu."
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Ibu hamil tidak ter-assign ke puskesmas ini"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Perawat tidak aktif"
+}
+```
+
+**Status 403 (Forbidden):**
+
+```json
+{
+  "detail": "Not authorized"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Not authorized to assign for this puskesmas"
+}
+```
+
+**Status 404 (Not Found):**
+
+```json
+{
+  "detail": "Ibu Hamil not found"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Perawat tidak ditemukan atau tidak terdaftar di puskesmas ini"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Puskesmas tidak ditemukan atau belum aktif"
+}
+```
+
+**Catatan Penting:**
+
+1. **Alur yang Direkomendasikan:**
+   - Pertama, assign ibu hamil ke puskesmas menggunakan endpoint `/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign`
+   - Kemudian, assign ibu hamil ke perawat menggunakan endpoint ini
+
+2. **Validasi:**
+   - Admin puskesmas hanya dapat assign ibu hamil ke puskesmas yang dikelolanya
+   - Ibu hamil harus sudah ter-assign ke puskesmas sebelum dapat di-assign ke perawat
+   - Perawat harus terdaftar di puskesmas yang sama dengan ibu hamil
+
+3. **Notifikasi:**
+   - Setelah assign berhasil, sistem akan mengirim notifikasi ke user ibu hamil
+   - Notifikasi berisi informasi puskesmas atau perawat yang ditugaskan
+
+---
+
 ## Ibu Hamil Endpoints
 
 ### 1. Register Ibu Hamil with User
@@ -2415,24 +2656,30 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 17. **List Pending Registrations** : Admin-only endpoint untuk melihat daftar puskesmas yang pending approval
 18. **Approve Puskesmas Registration** : Admin approval untuk puskesmas registration dengan mengirim notification
 19. **Reject Puskesmas Registration** : Admin rejection untuk puskesmas registration dengan alasan penolakan
+20. **Admin List Active Puskesmas (with stats)** : Admin-only list puskesmas yang sudah approved dan active dengan agregasi jumlah ibu hamil dan perawat
+21. **Admin Get Puskesmas Detail (with stats)** : Admin-only detail puskesmas plus jumlah ibu hamil aktif dan perawat aktif
+22. **Suspend Puskesmas** : Admin-only untuk menonaktifkan puskesmas yang sudah aktif/approved
+23. **Reinstate Puskesmas** : Admin-only untuk mengembalikan puskesmas yang disuspend menjadi active/approved
+24. **Assign Ibu Hamil ke Puskesmas** : Menugaskan satu ibu hamil ke puskesmas tertentu (admin atau puskesmas admin)
+25. **Assign Ibu Hamil ke Perawat** : Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut
 
 ### Ibu Hamil (Pregnant Women) Endpoints
 
-20. **Register Ibu Hamil with User** : Registrasi ibu hamil baru lengkap dengan user account dan auto-assign
-21. **Get My Profile (Current Ibu Hamil)** : Get profile ibu hamil yang sedang login atau kerabat yang linked
-22. **Get Ibu Hamil Detail** : Get detail ibu hamil berdasarkan ID dengan authorization check
-23. **Update Ibu Hamil Profile** : Update profile ibu hamil dengan auto-assign ulang jika location berubah
-24. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (admin/puskesmas only)
-25. **Manual Assign to Puskesmas** : Manual assignment ibu hamil ke puskesmas dengan optional perawat selection
-26. **Auto-Assign to Nearest Puskesmas** : Auto-assignment ibu hamil ke puskesmas terdekat dengan cek kapasitas
-27. **List Ibu Hamil by Puskesmas** : Daftar ibu hamil per puskesmas dengan pagination support
-28. **List Ibu Hamil by Perawat** : Daftar ibu hamil per perawat/nurse dengan authorization check
+26. **Register Ibu Hamil with User** : Registrasi ibu hamil baru lengkap dengan user account dan auto-assign
+27. **Get My Profile (Current Ibu Hamil)** : Get profile ibu hamil yang sedang login atau kerabat yang linked
+28. **Get Ibu Hamil Detail** : Get detail ibu hamil berdasarkan ID dengan authorization check
+29. **Update Ibu Hamil Profile** : Update profile ibu hamil dengan auto-assign ulang jika location berubah
+30. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (admin/puskesmas only)
+31. **Manual Assign to Puskesmas** : Manual assignment ibu hamil ke puskesmas dengan optional perawat selection
+32. **Auto-Assign to Nearest Puskesmas** : Auto-assignment ibu hamil ke puskesmas terdekat dengan cek kapasitas
+33. **List Ibu Hamil by Puskesmas** : Daftar ibu hamil per puskesmas dengan pagination support
+34. **List Ibu Hamil by Perawat** : Daftar ibu hamil per perawat/nurse dengan authorization check
 
 ---
 
 ### Statistik API
 
-- **Total Endpoints:** 28 API endpoints
+- **Total Endpoints:** 33 API endpoints
 - **Health Check:** 4 endpoints
 - **Authentication:** 3 endpoints
 - **User Management:** 5 endpoints
