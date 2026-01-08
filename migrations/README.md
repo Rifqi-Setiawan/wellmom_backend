@@ -164,16 +164,51 @@ Hasilnya harus menunjukkan constraint dengan role: `super_admin, puskesmas, pera
 
 ### Troubleshooting
 
-**Jika constraint masih error:**
-1. Pastikan Anda sudah connect ke database yang benar
-2. Pastikan user memiliki permission untuk ALTER TABLE
-3. Cek apakah ada data yang masih menggunakan role 'admin' (harus diupdate dulu)
+**Error: "check constraint 'check_user_role' of relation 'users' is violated by some row"**
 
-**Update data yang masih menggunakan role 'admin':**
+Error ini terjadi karena ada data di tabel `users` yang masih menggunakan role `'admin'`. 
+
+**Solusi:**
+
+**Opsi 1: Gunakan script migration yang sudah include data fix (RECOMMENDED):**
+```bash
+# Script ini akan otomatis update data 'admin' ke 'super_admin' sebelum update constraint
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/update_user_role_constraint_with_data_fix.sql
+```
+
+**Opsi 2: Update data manual terlebih dahulu:**
+```bash
+# 1. Cek data dengan role 'admin'
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "SELECT id, email, role FROM users WHERE role = 'admin';"
+
+# 2. Update ke 'super_admin'
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "UPDATE users SET role = 'super_admin' WHERE role = 'admin';"
+
+# 3. Baru update constraint
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/update_user_role_constraint.sql
+```
+
+**Opsi 3: Copy-paste SQL lengkap:**
+```bash
+docker exec -it wellmom_postgres psql -U wellmom -d wellmom_db
+```
+
+Kemudian jalankan:
 ```sql
--- Cek data dengan role 'admin'
+-- 1. Cek data dengan role 'admin'
 SELECT id, email, role FROM users WHERE role = 'admin';
 
--- Update ke 'super_admin' (jika perlu)
+-- 2. Update ke 'super_admin'
 UPDATE users SET role = 'super_admin' WHERE role = 'admin';
+
+-- 3. Drop constraint lama
+ALTER TABLE users DROP CONSTRAINT IF EXISTS check_user_role;
+
+-- 4. Tambahkan constraint baru
+ALTER TABLE users ADD CONSTRAINT check_user_role 
+    CHECK (role IN ('super_admin', 'puskesmas', 'perawat', 'ibu_hamil', 'kerabat'));
 ```
+
+**Error lainnya:**
+1. Pastikan Anda sudah connect ke database yang benar
+2. Pastikan user memiliki permission untuk ALTER TABLE dan UPDATE

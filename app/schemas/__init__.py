@@ -49,6 +49,20 @@ from .transfer_request import (
 	TransferRequestUpdate,
 	TransferRequestResponse,
 )
+from .conversation import (
+	ConversationBase,
+	ConversationCreate,
+	ConversationResponse,
+	ConversationWithLastMessage,
+	ConversationListResponse,
+)
+from .message import (
+	MessageCreate,
+	MessageResponse,
+	MessageListResponse,
+	MarkReadRequest,
+	UnreadCountResponse,
+)
 
 __all__ = [
 	# User
@@ -94,4 +108,16 @@ __all__ = [
 	"TransferRequestCreate",
 	"TransferRequestUpdate",
 	"TransferRequestResponse",
+	# Conversation
+	"ConversationBase",
+	"ConversationCreate",
+	"ConversationResponse",
+	"ConversationWithLastMessage",
+	"ConversationListResponse",
+	# Message
+	"MessageCreate",
+	"MessageResponse",
+	"MessageListResponse",
+	"MarkReadRequest",
+	"UnreadCountResponse",
 ]

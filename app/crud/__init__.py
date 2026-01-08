@@ -9,6 +9,8 @@ from .kerabat import crud_kerabat
 from .health_record import crud_health_record
 from .notification import crud_notification
 from .transfer_request import crud_transfer_request
+from .conversation import crud_conversation
+from .message import crud_message
 
 
 __all__ = [
@@ -23,4 +25,6 @@ __all__ = [
     "crud_health_record",
     "crud_notification",
     "crud_transfer_request",
+    "crud_conversation",
+    "crud_message",
 ]
