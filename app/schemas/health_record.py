@@ -1,7 +1,7 @@
 """Pydantic schemas for `HealthRecord` domain objects."""
 
 from datetime import date, datetime
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -151,3 +151,18 @@ class HealthRecordResponse(HealthRecordBase):
             "updated_at": "2025-02-15T10:00:00Z",
         }
     })
+
+
+class HealthRecordListResponse(BaseModel):
+    """Response for listing health records."""
+    records: List[HealthRecordResponse]
+    total: int
+
+
+class HealthRecordLast7DaysResponse(BaseModel):
+    """Response for last 7 days health records by category."""
+    category: str
+    records: List[HealthRecordResponse]
+    total: int
+    start_date: date
+    end_date: date
