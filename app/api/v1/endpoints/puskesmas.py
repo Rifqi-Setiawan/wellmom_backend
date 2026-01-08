@@ -165,26 +165,6 @@ async def admin_get_puskesmas(
 
 
 @router.get(
-    "/{puskesmas_id}",
-    response_model=PuskesmasResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Get puskesmas detail",
-)
-async def get_puskesmas(
-    puskesmas_id: int,
-    db: Session = Depends(get_db),
-) -> Puskesmas:
-    """Public detail endpoint."""
-    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
-    if not puskesmas:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Puskesmas not found",
-        )
-    return puskesmas
-
-
-@router.get(
     "/nearest",
     response_model=List[NearestPuskesmasResponse],
     status_code=status.HTTP_200_OK,
@@ -213,6 +193,26 @@ async def find_nearest_puskesmas(
             )
         )
     return response_list
+
+
+@router.get(
+    "/{puskesmas_id}",
+    response_model=PuskesmasResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get puskesmas detail",
+)
+async def get_puskesmas(
+    puskesmas_id: int,
+    db: Session = Depends(get_db),
+) -> Puskesmas:
+    """Public detail endpoint."""
+    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas not found",
+        )
+    return puskesmas
 
 
 @router.get(
