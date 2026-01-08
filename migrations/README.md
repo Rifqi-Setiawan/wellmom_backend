@@ -10,23 +10,76 @@ Migration ini mengupdate constraint `check_user_role` di tabel `users` untuk:
 
 #### Opsi 1: Via SSH ke VPS (Recommended untuk Production)
 
-1. **SSH ke VPS:**
-```bash
+**Untuk Windows (CMD/PowerShell):**
+
+1. **SSH ke VPS menggunakan CMD atau PowerShell:**
+```cmd
 ssh user@your_vps_ip
 ```
 
-2. **Masuk ke direktori project:**
+2. **Setelah masuk ke VPS (Linux), masuk ke direktori project:**
 ```bash
 cd /path/to/wellmom_backend
 ```
 
-3. **Jalankan script migration:**
+3. **Pull update terbaru dari GitHub:**
+```bash
+git pull origin main
+# atau
+git pull origin master
+```
+
+4. **Jalankan script migration:**
 ```bash
 # Jika menggunakan environment variables (.env)
 bash migrations/update_constraint_vps.sh
 
-# Atau jika database di Docker
-bash migrations/update_constraint_docker.sh [container_name]
+# Atau jika database di Docker (untuk setup wellmom_postgres)
+bash migrations/update_constraint_docker.sh wellmom_postgres wellmom wellmom_db
+
+# Atau lebih mudah, langsung via docker exec:
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/update_user_role_constraint.sql
+```
+
+**Atau jalankan SQL langsung (lebih cepat):**
+```bash
+# Connect ke database
+psql -U your_username -d your_database -h localhost
+
+# Kemudian jalankan SQL:
+ALTER TABLE users DROP CONSTRAINT IF EXISTS check_user_role;
+ALTER TABLE users ADD CONSTRAINT check_user_role 
+    CHECK (role IN ('super_admin', 'puskesmas', 'perawat', 'ibu_hamil', 'kerabat'));
+```
+
+**Workflow lengkap dari lokal ke VPS:**
+```cmd
+# 1. Di VSCode lokal (Windows), commit dan push ke GitHub
+git add .
+git commit -m "Update user role constraint untuk super_admin"
+git push origin main
+
+# 2. SSH ke VPS
+ssh user@your_vps_ip
+
+# 3. Di VPS, pull update
+cd /path/to/wellmom_backend
+git pull origin main
+
+# 4. Jalankan migration (pilih salah satu):
+# Opsi A: Via script (berikan permission dulu jika perlu)
+chmod +x migrations/update_constraint_vps.sh
+bash migrations/update_constraint_vps.sh
+
+# Opsi B: Via psql langsung (LEBIH MUDAH - Recommended)
+psql -U your_username -d your_database -h localhost -f migrations/update_user_role_constraint.sql
+
+# Opsi C: Copy-paste SQL langsung
+psql -U your_username -d your_database -h localhost
+# Kemudian jalankan:
+# ALTER TABLE users DROP CONSTRAINT IF EXISTS check_user_role;
+# ALTER TABLE users ADD CONSTRAINT check_user_role 
+#     CHECK (role IN ('super_admin', 'puskesmas', 'perawat', 'ibu_hamil', 'kerabat'));
 ```
 
 #### Opsi 2: Menjalankan SQL Langsung via psql di VPS
@@ -54,15 +107,38 @@ FROM pg_constraint
 WHERE conname = 'check_user_role';
 ```
 
-#### Opsi 3: Via Docker (jika database di Docker)
+#### Opsi 3: Via Docker (jika database di Docker) - **RECOMMENDED untuk setup Anda**
 
+**Cara 1: Menggunakan script (untuk setup wellmom_postgres):**
 ```bash
-# Copy file SQL ke container dan jalankan
-docker exec -i your_postgres_container psql -U your_username -d your_database < migrations/update_user_role_constraint.sql
+# Berikan permission dulu
+chmod +x migrations/update_constraint_docker.sh
 
-# Atau masuk ke container dan jalankan
-docker exec -it your_postgres_container psql -U your_username -d your_database
-# Kemudian copy-paste SQL dari update_user_role_constraint.sql
+# Jalankan dengan default (wellmom_postgres, wellmom, wellmom_db)
+bash migrations/update_constraint_docker.sh
+
+# Atau dengan parameter custom
+bash migrations/update_constraint_docker.sh [container_name] [db_user] [db_name]
+```
+
+**Cara 2: Langsung via docker exec (LEBIH MUDAH - Recommended):**
+```bash
+# Jalankan SQL file langsung
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/update_user_role_constraint.sql
+
+# Atau copy-paste SQL langsung
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "ALTER TABLE users DROP CONSTRAINT IF EXISTS check_user_role; ALTER TABLE users ADD CONSTRAINT check_user_role CHECK (role IN ('super_admin', 'puskesmas', 'perawat', 'ibu_hamil', 'kerabat'));"
+```
+
+**Cara 3: Masuk ke container dan jalankan SQL:**
+```bash
+# Masuk ke psql di container
+docker exec -it wellmom_postgres psql -U wellmom -d wellmom_db
+
+# Kemudian copy-paste SQL berikut:
+ALTER TABLE users DROP CONSTRAINT IF EXISTS check_user_role;
+ALTER TABLE users ADD CONSTRAINT check_user_role 
+    CHECK (role IN ('super_admin', 'puskesmas', 'perawat', 'ibu_hamil', 'kerabat'));
 ```
 
 #### Opsi 4: Via Database Management Tool
