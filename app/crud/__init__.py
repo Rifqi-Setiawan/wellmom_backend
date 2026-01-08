@@ -11,6 +11,9 @@ from .notification import crud_notification
 from .transfer_request import crud_transfer_request
 from .conversation import crud_conversation
 from .message import crud_message
+from .post import crud_post
+from .post_like import crud_post_like
+from .post_reply import crud_post_reply
 
 
 __all__ = [
@@ -27,4 +30,7 @@ __all__ = [
     "crud_transfer_request",
     "crud_conversation",
     "crud_message",
+    "crud_post",
+    "crud_post_like",
+    "crud_post_reply",
 ]

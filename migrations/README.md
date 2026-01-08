@@ -1,5 +1,55 @@
 # Database Migrations
 
+## Create Forum Tables
+
+Migration ini membuat tables untuk fitur forum diskusi:
+- `posts`: Tabel untuk postingan forum
+- `post_likes`: Tabel untuk like pada postingan
+- `post_replies`: Tabel untuk reply/comment pada postingan
+
+### Cara Menjalankan Migration di VPS
+
+#### Opsi 1: Via Docker (RECOMMENDED)
+
+```bash
+# Pastikan container PostgreSQL berjalan
+docker ps | grep wellmom_postgres
+
+# Jalankan migration
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/create_forum_tables.sql
+```
+
+Atau menggunakan script:
+```bash
+bash migrations/create_forum_tables_docker.sh
+```
+
+#### Opsi 2: Copy-paste SQL langsung
+
+1. **Connect ke database:**
+```bash
+docker exec -it wellmom_postgres psql -U wellmom -d wellmom_db
+```
+
+2. **Copy-paste isi file `migrations/create_forum_tables.sql`** ke console
+
+3. **Verifikasi:**
+```sql
+\dt posts post_likes post_replies
+```
+
+### Verifikasi Migration
+
+Setelah migration berhasil, verifikasi dengan:
+
+```bash
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "\d posts"
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "\d post_likes"
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "\d post_replies"
+```
+
+---
+
 ## Update User Role Constraint
 
 Migration ini mengupdate constraint `check_user_role` di tabel `users` untuk:

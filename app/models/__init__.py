@@ -13,6 +13,9 @@ from .notification import Notification
 from .transfer_request import TransferRequest
 from .conversation import Conversation
 from .message import Message
+from .post import Post
+from .post_like import PostLike
+from .post_reply import PostReply
 
 # Export all models
 __all__ = [
@@ -27,4 +30,7 @@ __all__ = [
     "TransferRequest",
     "Conversation",
     "Message",
+    "Post",
+    "PostLike",
+    "PostReply",
 ]
