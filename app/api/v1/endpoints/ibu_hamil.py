@@ -107,9 +107,26 @@ class IbuHamilRegisterRequest(BaseModel):
     })
 
 
-class AssignRequest(BaseModel):
+class AssignToPuskesmasRequest(BaseModel):
+    """Request body untuk assign ibu hamil ke puskesmas."""
     puskesmas_id: int
-    perawat_id: Optional[int] = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "puskesmas_id": 2
+        }
+    })
+
+
+class AssignToPerawatRequest(BaseModel):
+    """Request body untuk assign ibu hamil ke perawat."""
+    perawat_id: int
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "perawat_id": 3
+        }
+    })
 
 
 class AutoAssignResponse(BaseModel):
@@ -721,18 +738,97 @@ async def list_unassigned(
 
 
 @router.post(
-    "/{ibu_id}/assign",
+    "/{ibu_id}/assign-puskesmas",
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
-    summary="Assign manual ke puskesmas/perawat",
-    description="Admin atau admin puskesmas dapat menugaskan ibu ke puskesmas tertentu, opsional memilih perawat.",
+    summary="Assign ibu hamil ke puskesmas",
+    description="""
+Menugaskan ibu hamil ke puskesmas tertentu secara manual.
+
+**Siapa yang dapat mengakses:**
+- Admin sistem
+- Admin puskesmas (hanya untuk puskesmas yang dikelolanya)
+
+**Catatan:**
+- Puskesmas harus dalam status 'approved' dan aktif
+- Endpoint ini HANYA untuk assign ke puskesmas, bukan ke perawat
+- Untuk assign ke perawat, gunakan endpoint `/ibu-hamil/{ibu_id}/assign-perawat`
+- Setelah assign ke puskesmas, ibu hamil belum memiliki perawat yang menangani
+
+**Alur yang direkomendasikan:**
+1. Assign ibu hamil ke puskesmas menggunakan endpoint ini
+2. Kemudian assign ke perawat menggunakan endpoint `/ibu-hamil/{ibu_id}/assign-perawat`
+""",
+    responses={
+        200: {
+            "description": "Berhasil assign ibu hamil ke puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "puskesmas_id": 2,
+                        "perawat_id": None,
+                        "nik": "3175091201850001",
+                        "nama_lengkap": "Siti Aminah",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "not_authorized": {
+                            "summary": "Bukan admin atau admin puskesmas",
+                            "value": {"detail": "Not authorized"}
+                        },
+                        "wrong_puskesmas": {
+                            "summary": "Admin puskesmas mencoba assign ke puskesmas lain",
+                            "value": {"detail": "Not authorized to assign for this puskesmas"}
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Data tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ibu_not_found": {
+                            "summary": "Ibu hamil tidak ditemukan",
+                            "value": {"detail": "Ibu Hamil not found"}
+                        },
+                        "puskesmas_not_found": {
+                            "summary": "Puskesmas tidak ditemukan atau tidak aktif",
+                            "value": {"detail": "Puskesmas tidak ditemukan atau belum aktif"}
+                        }
+                    }
+                }
+            }
+        }
+    }
 )
-async def assign_ibu_hamil(
+async def assign_ibu_to_puskesmas(
     ibu_id: int,
-    payload: AssignRequest,
+    payload: AssignToPuskesmasRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> IbuHamil:
+    """
+    Assign ibu hamil ke puskesmas tertentu.
+
+    Args:
+        ibu_id: ID ibu hamil yang akan di-assign
+        payload: Data berisi puskesmas_id tujuan
+        current_user: User yang sedang login
+        db: Database session
+
+    Returns:
+        IbuHamil: Data ibu hamil yang sudah di-update
+    """
     if current_user.role not in {"admin", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -741,10 +837,6 @@ async def assign_ibu_hamil(
 
     ibu = _get_ibu_or_404(db, ibu_id)
 
-    # If puskesmas admin, ensure same puskesmas
-    if current_user.role == "puskesmas":
-        pusk_admin_for = db.scalars(select(IbuHamil).where(IbuHamil.puskesmas_id.isnot(None))).first()
-        # Loose check: ensure the target puskesmas is administered by current user
     pusk = crud_puskesmas.get(db, id=payload.puskesmas_id)
     if not pusk or pusk.registration_status != "approved" or not pusk.is_active:
         raise HTTPException(
@@ -764,21 +856,6 @@ async def assign_ibu_hamil(
         distance_km=0.0,
     )
 
-    if payload.perawat_id:
-        perawat = crud_perawat.get(db, id=payload.perawat_id)
-        if not perawat or perawat.puskesmas_id != pusk.id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Perawat tidak ditemukan di puskesmas ini",
-            )
-        if perawat.current_patients >= perawat.max_patients:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Perawat sudah penuh",
-            )
-        crud_ibu_hamil.assign_to_perawat(db, ibu_id=ibu.id, perawat_id=perawat.id)
-        crud_perawat.update_workload(db, perawat_id=perawat.id, increment=1)
-
     notification_in = NotificationCreate(
         user_id=ibu.user_id,
         title="Penugasan Puskesmas",
@@ -790,6 +867,183 @@ async def assign_ibu_hamil(
     crud_notification.create(db, obj_in=notification_in)
 
     return assigned
+
+
+@router.post(
+    "/{ibu_id}/assign-perawat",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Assign ibu hamil ke perawat",
+    description="""
+Menugaskan ibu hamil ke perawat tertentu.
+
+**Prasyarat:**
+- Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
+- Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
+- Perawat harus memiliki kapasitas (current_patients < max_patients)
+
+**Siapa yang dapat mengakses:**
+- Admin sistem
+- Admin puskesmas (hanya untuk ibu hamil di puskesmasnya)
+
+**Catatan:**
+- Gunakan endpoint `/ibu-hamil/{ibu_id}/assign-puskesmas` terlebih dahulu jika ibu hamil belum ter-assign ke puskesmas
+- Endpoint ini akan menambah workload perawat secara otomatis
+
+**Alur yang direkomendasikan:**
+1. Pastikan ibu hamil sudah ter-assign ke puskesmas
+2. Gunakan endpoint ini untuk assign ke perawat yang tersedia di puskesmas tersebut
+""",
+    responses={
+        200: {
+            "description": "Berhasil assign ibu hamil ke perawat",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "puskesmas_id": 2,
+                        "perawat_id": 3,
+                        "nik": "3175091201850001",
+                        "nama_lengkap": "Siti Aminah",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Request tidak valid",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "no_puskesmas": {
+                            "summary": "Ibu hamil belum ter-assign ke puskesmas",
+                            "value": {"detail": "Ibu hamil belum ter-assign ke puskesmas. Silakan assign ke puskesmas terlebih dahulu."}
+                        },
+                        "perawat_full": {
+                            "summary": "Perawat sudah mencapai kapasitas maksimal",
+                            "value": {"detail": "Perawat sudah mencapai kapasitas maksimal pasien"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "not_authorized": {
+                            "summary": "Bukan admin atau admin puskesmas",
+                            "value": {"detail": "Not authorized"}
+                        },
+                        "wrong_puskesmas": {
+                            "summary": "Admin puskesmas mencoba assign ibu hamil dari puskesmas lain",
+                            "value": {"detail": "Not authorized to assign perawat for this ibu hamil"}
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Data tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ibu_not_found": {
+                            "summary": "Ibu hamil tidak ditemukan",
+                            "value": {"detail": "Ibu Hamil not found"}
+                        },
+                        "perawat_not_found": {
+                            "summary": "Perawat tidak ditemukan atau bukan dari puskesmas yang sama",
+                            "value": {"detail": "Perawat tidak ditemukan atau tidak terdaftar di puskesmas ibu hamil ini"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+async def assign_ibu_to_perawat(
+    ibu_id: int,
+    payload: AssignToPerawatRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    """
+    Assign ibu hamil ke perawat yang terdaftar di puskesmas ibu hamil.
+
+    Args:
+        ibu_id: ID ibu hamil yang akan di-assign
+        payload: Data berisi perawat_id tujuan
+        current_user: User yang sedang login
+        db: Database session
+
+    Returns:
+        IbuHamil: Data ibu hamil yang sudah di-update dengan perawat_id baru
+
+    Raises:
+        HTTPException 400: Ibu hamil belum ter-assign ke puskesmas atau perawat penuh
+        HTTPException 403: Tidak memiliki akses
+        HTTPException 404: Ibu hamil atau perawat tidak ditemukan
+    """
+    if current_user.role not in {"admin", "puskesmas"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+
+    ibu = _get_ibu_or_404(db, ibu_id)
+
+    # Cek apakah ibu hamil sudah ter-assign ke puskesmas
+    if not ibu.puskesmas_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ibu hamil belum ter-assign ke puskesmas. Silakan assign ke puskesmas terlebih dahulu.",
+        )
+
+    # Jika admin puskesmas, pastikan ibu hamil berada di puskesmasnya
+    if current_user.role == "puskesmas":
+        pusk = crud_puskesmas.get(db, id=ibu.puskesmas_id)
+        if not pusk or pusk.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to assign perawat for this ibu hamil",
+            )
+
+    # Cek perawat
+    perawat = crud_perawat.get(db, id=payload.perawat_id)
+    if not perawat or perawat.puskesmas_id != ibu.puskesmas_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tidak ditemukan atau tidak terdaftar di puskesmas ibu hamil ini",
+        )
+
+    # Cek kapasitas perawat
+    if perawat.current_patients >= perawat.max_patients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Perawat sudah mencapai kapasitas maksimal pasien",
+        )
+
+    # Assign ke perawat
+    crud_ibu_hamil.assign_to_perawat(db, ibu_id=ibu.id, perawat_id=perawat.id)
+    crud_perawat.update_workload(db, perawat_id=perawat.id, increment=1)
+
+    # Refresh data ibu hamil
+    db.refresh(ibu)
+
+    # Kirim notifikasi
+    notification_in = NotificationCreate(
+        user_id=ibu.user_id,
+        title="Penugasan Perawat",
+        message=f"Anda akan ditangani oleh perawat {perawat.nama_lengkap}.",
+        notification_type="assignment",
+        priority="normal",
+        sent_via="in_app",
+    )
+    crud_notification.create(db, obj_in=notification_in)
+
+    return ibu
 
 
 @router.post(
