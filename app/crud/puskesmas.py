@@ -169,28 +169,30 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         return result
 
     def find_nearest(
-        self, db: Session, *, latitude: float, longitude: float, radius_km: float = 10.0
+        self, db: Session, *, latitude: float, longitude: float, limit: int = 5
     ) -> List[Tuple[Puskesmas, float]]:
-        """Find Puskesmas within radius using PostGIS distance.
-        
+        """Find nearest Puskesmas using PostGIS distance.
+
         Returns list of (Puskesmas, distance_km) tuples, ordered by distance.
+        Only returns approved and active puskesmas, limited to specified count.
         """
         # Create point from input coordinates
         point_wkt = f"POINT({longitude} {latitude})"
         reference_point = ST_GeogFromText(point_wkt)
-        
+
         # Calculate distance in meters, convert to km
         distance_m = ST_Distance(Puskesmas.location, reference_point)
         distance_km = distance_m / 1000.0
-        
+
         stmt = (
             select(Puskesmas, distance_km.label("distance"))
             .where(Puskesmas.is_active == True)
             .where(Puskesmas.registration_status == "approved")
-            .where(distance_km <= radius_km)
+            .where(Puskesmas.location.isnot(None))
             .order_by(distance_km)
+            .limit(limit)
         )
-        
+
         results = db.execute(stmt).all()
         return [(row[0], row[1]) for row in results]
 

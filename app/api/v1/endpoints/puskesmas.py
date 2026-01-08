@@ -28,6 +28,7 @@ class RejectionReason(BaseModel):
 class NearestPuskesmasResponse(BaseModel):
     puskesmas: PuskesmasResponse
     distance_km: float
+    address: str
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -38,6 +39,7 @@ class NearestPuskesmasResponse(BaseModel):
                 "is_active": True,
             },
             "distance_km": 1.2,
+            "address": "Jl. Merdeka No. 1, Sungai Penuh, Jambi",
         }
     })
 
@@ -189,28 +191,26 @@ async def get_puskesmas(
 async def find_nearest_puskesmas(
     latitude: float,
     longitude: float,
-    radius_km: float = 20.0,
     db: Session = Depends(get_db),
 ) -> List[NearestPuskesmasResponse]:
-    """Find nearest active and approved puskesmas within radius."""
+    """Find up to 5 nearest active and approved puskesmas, sorted by distance."""
     results = crud_puskesmas.find_nearest(
         db,
         latitude=latitude,
         longitude=longitude,
-        radius_km=radius_km,
+        limit=5,
     )
 
-    filtered: List[NearestPuskesmasResponse] = []
+    response_list: List[NearestPuskesmasResponse] = []
     for puskesmas, distance in results:
-        if puskesmas.registration_status != "approved":
-            continue
-        filtered.append(
+        response_list.append(
             NearestPuskesmasResponse(
                 puskesmas=PuskesmasResponse.from_orm(puskesmas),
-                distance_km=float(distance),
+                distance_km=round(float(distance), 2),
+                address=puskesmas.address,
             )
         )
-    return filtered
+    return response_list
 
 
 @router.get(

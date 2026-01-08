@@ -906,9 +906,10 @@ GET /api/v1/puskesmas/1
 ### 4. Find Nearest Puskesmas
 
 **Deskripsi Endpoint:**
-- Cari puskesmas terdekat berdasarkan koordinat dan radius
+- Cari maksimal 5 puskesmas terdekat berdasarkan koordinat lokasi user
 - Menggunakan PostGIS untuk geo-spatial query
 - Hanya return puskesmas yang approved dan active
+- Tidak ada batas radius, mengembalikan 5 puskesmas terdekat yang tersedia
 
 **Request Details:**
 
@@ -919,16 +920,15 @@ GET /api/v1/puskesmas/1
 
 **Query Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| latitude | float | Yes | - | Latitude koordinat user |
-| longitude | float | Yes | - | Longitude koordinat user |
-| radius_km | float | No | 20.0 | Radius pencarian dalam km |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| latitude | float | Yes | Latitude koordinat user |
+| longitude | float | Yes | Longitude koordinat user |
 
 **Example Request:**
 
 ```
-GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39&radius_km=20
+GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39
 ```
 
 **Response Details:**
@@ -948,7 +948,8 @@ GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39&radius_km=20
       "registration_status": "approved",
       "is_active": true
     },
-    "distance_km": 0.5
+    "distance_km": 0.5,
+    "address": "Jl. Mawar No. 10, Sungai Penuh"
   },
   {
     "puskesmas": {
@@ -961,10 +962,24 @@ GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39&radius_km=20
       "registration_status": "approved",
       "is_active": true
     },
-    "distance_km": 2.3
+    "distance_km": 2.3,
+    "address": "Jl. Diponegoro No. 5"
   }
 ]
 ```
+
+**Response Schema:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| puskesmas | object | Detail lengkap puskesmas (PuskesmasResponse) |
+| distance_km | float | Jarak dalam kilometer dari koordinat user |
+| address | string | Alamat lengkap puskesmas (untuk akses cepat) |
+
+**Notes:**
+- Response mengembalikan maksimal 5 puskesmas terdekat
+- Diurutkan berdasarkan jarak terdekat ke terjauh
+- Hanya puskesmas dengan `registration_status: approved` yang ditampilkan
 
 ---
 
@@ -2396,7 +2411,7 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 13. **Register New Puskesmas** : Registrasi puskesmas baru dengan membuat user linked role 'puskesmas'
 14. **List Active Puskesmas** : Public endpoint untuk melihat daftar puskesmas yang active dan approved
 15. **Get Puskesmas Detail** : Get detail puskesmas berdasarkan ID dengan informasi lengkap
-16. **Find Nearest Puskesmas** : Cari puskesmas terdekat berdasarkan koordinat latitude/longitude dan radius
+16. **Find Nearest Puskesmas** : Cari maksimal 5 puskesmas terdekat berdasarkan koordinat latitude/longitude
 17. **List Pending Registrations** : Admin-only endpoint untuk melihat daftar puskesmas yang pending approval
 18. **Approve Puskesmas Registration** : Admin approval untuk puskesmas registration dengan mengirim notification
 19. **Reject Puskesmas Registration** : Admin rejection untuk puskesmas registration dengan alasan penolakan
