@@ -35,8 +35,8 @@ WellMom API adalah backend service untuk aplikasi manajemen kesehatan ibu hamil 
 - 🔐 Role-based access control (RBAC)
 
 ### User Roles:
-- **admin**: Administrator platform
-- **puskesmas**: Puskesmas administrator
+- **super_admin**: Super administrator (dapat approve/reject/deactivate registrasi puskesmas, read-only untuk data lainnya)
+- **puskesmas**: Puskesmas administrator (mengelola perawat dan assign ibu hamil di puskesmasnya)
 - **perawat**: Nurse/Healthcare worker
 - **ibu_hamil**: Pregnant woman
 - **kerabat**: Family member/Guardian
@@ -370,19 +370,192 @@ Content-Type: application/json
 
 ---
 
+### 4. Register Super Admin
+
+**Deskripsi Endpoint:**
+- Registrasi akun super admin baru
+- Super admin memiliki akses terbatas: dapat approve/reject registrasi puskesmas dan melihat data (read-only)
+- Super admin TIDAK dapat mengelola perawat atau assign ibu hamil
+- Endpoint ini sebaiknya hanya digunakan untuk setup awal sistem
+
+**Request Details:**
+
+- **HTTP Method:** POST
+- **URL Path:** `/api/v1/auth/register/super-admin`
+- **Authentication:** Not required
+- **Status Codes:** 201 (Created), 400 (Bad Request)
+
+**Headers:**
+
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "email": "superadmin@wellmom.go.id",
+  "phone": "+6281234567890",
+  "password": "SuperSecurePass123!",
+  "full_name": "Super Admin WellMom"
+}
+```
+
+**Request Body Schema:**
+
+| Field | Type | Required | Validation |
+|-------|------|----------|-----------|
+| email | string | Yes | Valid email format, unique |
+| phone | string | Yes | 8-15 digits, optional leading '+', unique |
+| password | string | Yes | Minimum 8 characters |
+| full_name | string | Yes | Non-empty string |
+
+**Response Details:**
+
+**Success Response (Status 201):**
+
+```json
+{
+  "user": {
+    "id": 1,
+    "email": "superadmin@wellmom.go.id",
+    "phone": "+6281234567890",
+    "full_name": "Super Admin WellMom",
+    "role": "super_admin",
+    "is_active": true,
+    "is_verified": false
+  },
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Error Response (Status 400):**
+
+```json
+{
+  "detail": "Email already registered"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Phone number already registered"
+}
+```
+
+**Catatan Penting:**
+- Super admin hanya dapat approve/reject registrasi puskesmas
+- Super admin dapat melihat data puskesmas, perawat, dan ibu hamil (read-only)
+- Super admin TIDAK dapat mengelola perawat atau assign ibu hamil
+
+---
+
+### 5. Login Super Admin
+
+**Deskripsi Endpoint:**
+- Login endpoint khusus untuk super admin menggunakan email dan password
+- Hanya user dengan role 'super_admin' yang dapat login melalui endpoint ini
+- Mengembalikan JWT token beserta informasi user
+
+**Request Details:**
+
+- **HTTP Method:** POST
+- **URL Path:** `/api/v1/auth/login/super-admin`
+- **Authentication:** Not required
+- **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden)
+
+**Headers:**
+
+```
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "email": "superadmin@wellmom.go.id",
+  "password": "SuperSecurePass123!"
+}
+```
+
+**Request Body Schema:**
+
+| Field | Type | Required | Validation |
+|-------|------|----------|-----------|
+| email | string | Yes | Valid email format |
+| password | string | Yes | Password yang terdaftar |
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "role": "super_admin",
+  "user": {
+    "id": 1,
+    "email": "superadmin@wellmom.go.id",
+    "full_name": "Super Admin WellMom"
+  }
+}
+```
+
+**Error Responses:**
+
+**Status 401 (Unauthorized):**
+
+```json
+{
+  "detail": "Email atau password salah"
+}
+```
+
+atau
+
+```json
+{
+  "detail": "Akun pengguna tidak aktif"
+}
+```
+
+**Status 403 (Forbidden):**
+
+```json
+{
+  "detail": "Akun ini bukan akun super admin"
+}
+```
+
+**Akses Super Admin:**
+
+- ✅ Dapat approve/reject registrasi puskesmas
+- ✅ Dapat melihat data puskesmas, perawat, dan ibu hamil (read-only)
+- ❌ TIDAK dapat mengelola perawat
+- ❌ TIDAK dapat assign ibu hamil ke puskesmas atau perawat
+
+---
+
 ## User Management Endpoints
 
 ### 1. List All Users
 
 **Deskripsi Endpoint:**
-- Hanya admin yang dapat melihat semua users
+- Admin dan super admin dapat melihat semua users
+- Super admin memiliki akses read-only
 - Support pagination dengan skip dan limit parameters
 
 **Request Details:**
 
 - **HTTP Method:** GET
 - **URL Path:** `/api/v1/users`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Admin atau Super Admin)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden)
 
 **Headers:**
@@ -602,14 +775,14 @@ Content-Type: application/json
 
 **Deskripsi Endpoint:**
 - Deaktifkan/soft delete user
-- Hanya admin yang dapat melakukan ini
+- Hanya super admin yang dapat melakukan ini
 - User tidak dihapus, hanya di-set inactive
 
 **Request Details:**
 
 - **HTTP Method:** DELETE
 - **URL Path:** `/api/v1/users/{user_id}`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Super Admin Only)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Path Parameters:**
@@ -651,8 +824,10 @@ Authorization: Bearer <token>
 
 **Deskripsi Endpoint:**
 - Registrasi puskesmas baru (kesehatan publik)
-- Membuat user linked dengan role 'puskesmas'
-- Initial status: "pending" (menunggu approval admin)
+- Membuat satu akun admin puskesmas dengan role 'puskesmas'
+- **Konsep Penting:** Setiap puskesmas hanya memiliki satu akun admin puskesmas
+- Akun admin puskesmas digunakan untuk mengelola perawat dan assign ibu hamil ke perawat
+- Initial status: "pending_approval" (menunggu approval super admin)
 - Validasi phone untuk mencegah duplikat
 
 **Request Details:**
@@ -986,7 +1161,7 @@ GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39
 ### 5. List Pending Registrations
 
 **Deskripsi Endpoint:**
-- Admin-only endpoint untuk melihat daftar puskesmas yang pending approval
+- Super admin-only endpoint untuk melihat daftar puskesmas yang pending approval
 - Digunakan untuk approval workflow
 - Response menyertakan seluruh dokumen yang diupload (SK, izin operasional, NPWP, akreditasi, foto gedung, foto verifikasi, KTP kepala) untuk keperluan review
 
@@ -994,7 +1169,7 @@ GET /api/v1/puskesmas/nearest?latitude=-2.06&longitude=101.39
 
 - **HTTP Method:** GET
 - **URL Path:** `/api/v1/puskesmas/pending`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Super Admin Only)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden)
 
 **Example Request:**
@@ -1035,15 +1210,16 @@ Authorization: Bearer <token>
 ### 6. Approve Puskesmas Registration
 
 **Deskripsi Endpoint:**
-- Admin approval untuk puskesmas registration
-- Mengubah status dari "pending" menjadi "approved"
+- Admin atau super admin approval untuk puskesmas registration
+- Mengubah status dari "pending_approval" menjadi "approved"
 - Mengirimkan notification ke admin user puskesmas
+- **Akses:** Super admin
 
 **Request Details:**
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/approve`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Admin atau Super Admin)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Path Parameters:**
@@ -1082,16 +1258,17 @@ Authorization: Bearer <token>
 ### 7. Reject Puskesmas Registration
 
 **Deskripsi Endpoint:**
-- Admin rejection untuk puskesmas registration
-- Mengubah status dari "pending" menjadi "rejected"
+- Admin atau super admin rejection untuk puskesmas registration
+- Mengubah status dari "pending_approval" menjadi "rejected"
 - Harus menyertakan rejection reason
 - Mengirimkan notification ke admin user puskesmas
+- **Akses:** Super admin
 
 **Request Details:**
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/reject`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Admin atau Super Admin)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Headers:**
@@ -1137,14 +1314,15 @@ Content-Type: application/json
 ### 8. Admin List Active Puskesmas (with stats)
 
 **Deskripsi Endpoint:**
-- Admin-only list puskesmas yang sudah approved dan active
+- Admin atau super admin dapat melihat list puskesmas yang sudah approved dan active
 - Menyertakan agregasi jumlah ibu hamil aktif dan perawat aktif per puskesmas
+- Super admin memiliki akses read-only
 
 **Request Details:**
 
 - **HTTP Method:** GET
 - **URL Path:** `/api/v1/puskesmas/admin/active`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Admin atau Super Admin)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden)
 
 **Example Request:**
@@ -1181,14 +1359,15 @@ Authorization: Bearer <token>
 ### 9. Admin Get Puskesmas Detail (with stats)
 
 **Deskripsi Endpoint:**
-- Admin-only detail puskesmas plus jumlah ibu hamil aktif dan perawat aktif
+- Admin atau super admin dapat melihat detail puskesmas plus jumlah ibu hamil aktif dan perawat aktif
 - Menyertakan seluruh dokumen legal dan data kepala puskesmas untuk audit
+- Super admin memiliki akses read-only
 
 **Request Details:**
 
 - **HTTP Method:** GET
 - **URL Path:** `/api/v1/puskesmas/admin/{puskesmas_id}`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Admin atau Super Admin)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Path Parameters:**
@@ -1227,19 +1406,28 @@ Authorization: Bearer <token>
 
 ---
 
-### 10. Suspend Puskesmas
+### 10. Deactivate Puskesmas
 
 **Deskripsi Endpoint:**
-- Admin-only untuk menonaktifkan puskesmas yang sudah aktif/approved
-- Menyimpan alasan suspend dan mencatat waktu suspend
+- Super admin-only untuk menonaktifkan puskesmas yang sedang aktif
+- **Cascade Effects:**
+  1. Semua ibu hamil yang ter-assign ke puskesmas ini akan kehilangan relasi (puskesmas_id = NULL, perawat_id = NULL)
+  2. Semua perawat yang terdaftar di puskesmas ini akan otomatis terhapus (beserta akun usernya jika ada)
+  3. Akun admin puskesmas akan dinonaktifkan (is_active = False)
+  4. Puskesmas akan dinonaktifkan (is_active = False)
 - Mengirim notifikasi ke admin user puskesmas
+
+**Catatan Penting:**
+- Ibu hamil yang kehilangan relasi harus memilih puskesmas aktif baru
+- Perawat yang terhapus tidak dapat diakses lagi
+- Admin puskesmas tidak dapat login setelah puskesmas dinonaktifkan
 
 **Request Details:**
 
 - **HTTP Method:** POST
-- **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/suspend`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
-- **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
+- **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/deactivate`
+- **Authentication:** **Required** (Bearer Token - Super Admin Only)
+- **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Headers:**
 
@@ -1247,6 +1435,12 @@ Authorization: Bearer <token>
 Authorization: Bearer <access_token>
 Content-Type: application/json
 ```
+
+**Path Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| puskesmas_id | integer | Yes | ID puskesmas yang akan dinonaktifkan |
 
 **Request Body:**
 
@@ -1262,10 +1456,25 @@ Content-Type: application/json
 {
   "id": 1,
   "name": "Puskesmas Sungai Penuh",
-  "registration_status": "suspended",
+  "registration_status": "approved",
   "is_active": false,
-  "suspension_reason": "Melanggar ketentuan operasional",
-  "suspended_at": "2025-01-10T09:30:00Z"
+  "admin_notes": "[Deactivated] Melanggar ketentuan operasional"
+}
+```
+
+**Error Response (Status 400):**
+
+```json
+{
+  "detail": "Puskesmas sudah tidak aktif"
+}
+```
+
+**Error Response (Status 403):**
+
+```json
+{
+  "detail": "Not authorized. Hanya super admin yang dapat menonaktifkan puskesmas."
 }
 ```
 
@@ -1274,7 +1483,7 @@ Content-Type: application/json
 ### 11. Reinstate Puskesmas
 
 **Deskripsi Endpoint:**
-- Admin-only untuk mengembalikan puskesmas yang disuspend menjadi active/approved
+- Super admin-only untuk mengembalikan puskesmas yang disuspend menjadi active/approved
 - Membersihkan alasan suspend dan mencatat approval admin terakhir
 - Mengirim notifikasi ke admin user puskesmas
 
@@ -1282,7 +1491,7 @@ Content-Type: application/json
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/reinstate`
-- **Authentication:** **Required** (Bearer Token - Admin Only)
+- **Authentication:** **Required** (Bearer Token - Super Admin Only)
 - **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Example Request:**
@@ -1312,7 +1521,11 @@ Authorization: Bearer <token>
 
 **Deskripsi Endpoint:**
 - Menugaskan satu ibu hamil ke puskesmas tertentu secara manual
-- Dapat diakses oleh admin sistem atau admin puskesmas (hanya untuk puskesmas yang dikelolanya)
+- **Konsep:** Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
+- Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+- Dapat diakses oleh:
+  - Admin puskesmas (hanya dapat assign ke puskesmas yang dikelolanya sendiri)
+- **Catatan:** Super admin TIDAK dapat assign (hanya dapat approve/reject registrasi puskesmas)
 - Puskesmas harus dalam status 'approved' dan aktif
 - Setelah assign ke puskesmas, ibu hamil belum memiliki perawat yang menangani
 - Mengirim notifikasi ke user ibu hamil
@@ -1321,7 +1534,7 @@ Authorization: Bearer <token>
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign`
-- **Authentication:** **Required** (Bearer Token - Admin atau Puskesmas Admin)
+- **Authentication:** **Required** (Bearer Token - Puskesmas Admin Only)
 - **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Headers:**
@@ -1404,9 +1617,15 @@ atau
 
 **Deskripsi Endpoint:**
 - Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut
-- Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
-- Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
-- Perawat harus aktif dan memiliki kapasitas
+- **Konsep:** Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
+- Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+- Dapat diakses oleh:
+  - Super admin (TIDAK dapat assign, hanya dapat approve/reject registrasi puskesmas)
+  - Admin puskesmas (hanya dapat assign untuk puskesmas yang dikelolanya sendiri)
+- **Prasyarat:**
+  - Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
+  - Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
+  - Perawat harus aktif dan memiliki kapasitas
 - Otomatis menambah workload perawat
 - Mengirim notifikasi ke user ibu hamil
 
@@ -1414,7 +1633,7 @@ atau
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign-perawat/{perawat_id}`
-- **Authentication:** **Required** (Bearer Token - Admin atau Puskesmas Admin)
+- **Authentication:** **Required** (Bearer Token - Puskesmas Admin Only)
 - **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Headers:**
@@ -2209,7 +2428,7 @@ Authorization: Bearer <token>
 
 **Deskripsi Endpoint:**
 - Daftar ibu hamil per perawat
-- Authorized untuk: Admin, perawat terkait, atau admin puskesmas yang menaungi perawat
+- Authorized untuk: Admin, super admin (read-only), perawat terkait, atau admin puskesmas yang menaungi perawat
 
 **Request Details:**
 
@@ -2641,7 +2860,7 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 
 ### User Management Endpoints
 
-8. **List All Users** : Melihat daftar semua users (admin only) dengan pagination support
+8. **List All Users** : Melihat daftar semua users (super admin only) dengan pagination support
 9. **Get Current User Info** : Endpoint duplikat untuk mengambil profile user yang sedang login
 10. **Get User by ID** : Retrieve data user berdasarkan user ID (admin atau self access)
 11. **Update User** : Update data user seperti phone, full_name, email, dan profile photo
@@ -2653,15 +2872,15 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 14. **List Active Puskesmas** : Public endpoint untuk melihat daftar puskesmas yang active dan approved
 15. **Get Puskesmas Detail** : Get detail puskesmas berdasarkan ID dengan informasi lengkap
 16. **Find Nearest Puskesmas** : Cari maksimal 5 puskesmas terdekat berdasarkan koordinat latitude/longitude
-17. **List Pending Registrations** : Admin-only endpoint untuk melihat daftar puskesmas yang pending approval
-18. **Approve Puskesmas Registration** : Admin approval untuk puskesmas registration dengan mengirim notification
-19. **Reject Puskesmas Registration** : Admin rejection untuk puskesmas registration dengan alasan penolakan
-20. **Admin List Active Puskesmas (with stats)** : Admin-only list puskesmas yang sudah approved dan active dengan agregasi jumlah ibu hamil dan perawat
-21. **Admin Get Puskesmas Detail (with stats)** : Admin-only detail puskesmas plus jumlah ibu hamil aktif dan perawat aktif
-22. **Suspend Puskesmas** : Admin-only untuk menonaktifkan puskesmas yang sudah aktif/approved
-23. **Reinstate Puskesmas** : Admin-only untuk mengembalikan puskesmas yang disuspend menjadi active/approved
-24. **Assign Ibu Hamil ke Puskesmas** : Menugaskan satu ibu hamil ke puskesmas tertentu (admin atau puskesmas admin)
-25. **Assign Ibu Hamil ke Perawat** : Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut
+17. **List Pending Registrations** : Admin atau super admin dapat melihat daftar puskesmas yang pending approval
+18. **Approve Puskesmas Registration** : Admin atau super admin approval untuk puskesmas registration dengan mengirim notification
+19. **Reject Puskesmas Registration** : Admin atau super admin rejection untuk puskesmas registration dengan alasan penolakan
+20. **Admin List Active Puskesmas (with stats)** : Admin atau super admin dapat melihat list puskesmas yang sudah approved dan active dengan agregasi jumlah ibu hamil dan perawat
+21. **Admin Get Puskesmas Detail (with stats)** : Admin atau super admin dapat melihat detail puskesmas plus jumlah ibu hamil aktif dan perawat aktif
+22. **Deactivate Puskesmas** : Super admin-only untuk menonaktifkan puskesmas yang sedang aktif dengan cascade effects
+23. **Reinstate Puskesmas** : Super admin-only untuk mengembalikan puskesmas yang disuspend menjadi active/approved
+24. **Assign Ibu Hamil ke Puskesmas** : Menugaskan satu ibu hamil ke puskesmas tertentu (admin atau puskesmas admin, super admin tidak dapat assign)
+25. **Assign Ibu Hamil ke Perawat** : Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut (admin atau puskesmas admin, super admin tidak dapat assign)
 
 ### Ibu Hamil (Pregnant Women) Endpoints
 
@@ -2669,7 +2888,7 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 27. **Get My Profile (Current Ibu Hamil)** : Get profile ibu hamil yang sedang login atau kerabat yang linked
 28. **Get Ibu Hamil Detail** : Get detail ibu hamil berdasarkan ID dengan authorization check
 29. **Update Ibu Hamil Profile** : Update profile ibu hamil dengan auto-assign ulang jika location berubah
-30. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (admin/puskesmas only)
+30. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (super admin/puskesmas only)
 31. **Manual Assign to Puskesmas** : Manual assignment ibu hamil ke puskesmas dengan optional perawat selection
 32. **Auto-Assign to Nearest Puskesmas** : Auto-assignment ibu hamil ke puskesmas terdekat dengan cek kapasitas
 33. **List Ibu Hamil by Puskesmas** : Daftar ibu hamil per puskesmas dengan pagination support
@@ -2679,7 +2898,7 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 
 ### Statistik API
 
-- **Total Endpoints:** 33 API endpoints
+- **Total Endpoints:** 35 API endpoints
 - **Health Check:** 4 endpoints
 - **Authentication:** 3 endpoints
 - **User Management:** 5 endpoints
@@ -2690,7 +2909,7 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 
 - **Public Endpoints:** 7 (Health checks, Register, Login, List Puskesmas, Get Puskesmas Detail, Find Nearest)
 - **Authenticated Endpoints:** 21 (Memerlukan JWT Bearer Token)
-- **Admin Only:** 5 (List Users, List Pending, Approve, Reject)
+- **Super Admin Only:** 5 (List Users, List Pending, Approve, Reject, Deactivate)
 - **Role-based Access:** 13 (Puskesmas admin, Perawat, Ibu Hamil, Kerabat)
 
 ---

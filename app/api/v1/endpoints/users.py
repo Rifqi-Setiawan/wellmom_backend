@@ -29,16 +29,16 @@ router = APIRouter(
 async def list_users(
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> List[User]:
     """
-    Get list of all users (admin only).
+    Get list of all users (admin atau super admin - read-only untuk super admin).
     
     Args:
         skip: Number of records to skip (pagination)
         limit: Maximum records to return
-        current_user: Current admin user (injected via require_role)
+        current_user: Current admin/super admin user (injected via require_role)
         db: Database session
         
     Returns:
@@ -94,8 +94,8 @@ async def get_user(
     Raises:
         HTTPException: 404 if user not found, 403 if not authorized
     """
-    # Check authorization: admin or self
-    if current_user.id != user_id and current_user.role != "admin":
+    # Check authorization: super admin (read-only), or self
+    if current_user.id != user_id and current_user.role != "super_admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this user",
@@ -138,11 +138,11 @@ async def update_user(
     Raises:
         HTTPException: 404 if user not found, 403 if not authorized, 400 if phone already in use
     """
-    # Check authorization: admin or self
-    if current_user.id != user_id and current_user.role != "admin":
+    # Check authorization: self only (super admin tidak dapat update user lain)
+    if current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this user",
+            detail="Not authorized to update this user. Hanya dapat update data sendiri.",
         )
     
     # Get existing user
@@ -175,7 +175,7 @@ async def update_user(
 )
 async def delete_user(
     user_id: int,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> dict:
     """

@@ -191,7 +191,8 @@ def _is_kerabat_linked(current_user: User, ibu: IbuHamil, db: Session) -> bool:
 
 def _authorize_view(ibu: IbuHamil, current_user: User, db: Session) -> None:
     """Authorize access to an IbuHamil record."""
-    if current_user.role == "admin":
+    # Super admin dapat melihat semua data (read-only)
+    if current_user.role == "super_admin":
         return
     if ibu.user_id == current_user.id:
         return
@@ -209,7 +210,12 @@ def _authorize_view(ibu: IbuHamil, current_user: User, db: Session) -> None:
 
 def _authorize_update(ibu: IbuHamil, current_user: User, db: Session) -> None:
     """Authorize update to an IbuHamil record."""
-    if current_user.role == "admin":
+    # Super admin tidak dapat update (read-only)
+    if current_user.role == "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin tidak dapat mengupdate data ibu hamil (read-only access).",
+        )
         return
     if ibu.user_id == current_user.id:
         return
@@ -723,13 +729,14 @@ async def update_ibu_hamil(
     response_model=List[IbuHamilResponse],
     status_code=status.HTTP_200_OK,
     summary="Ibu hamil belum ter-assign",
-    description="Hanya admin atau admin puskesmas yang dapat melihat daftar ibu hamil tanpa puskesmas.",
+    description="Admin, super admin (read-only), atau admin puskesmas yang dapat melihat daftar ibu hamil tanpa puskesmas.",
 )
 async def list_unassigned(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> List[IbuHamil]:
-    if current_user.role not in {"admin", "puskesmas"}:
+    # Super admin dapat melihat data (read-only)
+    if current_user.role not in {"super_admin", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",
@@ -829,10 +836,11 @@ async def assign_ibu_to_puskesmas(
     Returns:
         IbuHamil: Data ibu hamil yang sudah di-update
     """
-    if current_user.role not in {"admin", "puskesmas"}:
+    # Super admin TIDAK dapat assign (hanya bisa approve/reject registrasi puskesmas)
+    if current_user.role not in {"super_admin", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized",
+            detail="Not authorized. Super admin hanya dapat approve/reject registrasi puskesmas.",
         )
 
     ibu = _get_ibu_or_404(db, ibu_id)
@@ -986,10 +994,11 @@ async def assign_ibu_to_perawat(
         HTTPException 403: Tidak memiliki akses
         HTTPException 404: Ibu hamil atau perawat tidak ditemukan
     """
-    if current_user.role not in {"admin", "puskesmas"}:
+    # Super admin TIDAK dapat assign (hanya bisa approve/reject registrasi puskesmas)
+    if current_user.role not in {"super_admin", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized",
+            detail="Not authorized. Super admin hanya dapat approve/reject registrasi puskesmas.",
         )
 
     ibu = _get_ibu_or_404(db, ibu_id)
@@ -1060,7 +1069,7 @@ async def auto_assign(
 ) -> AutoAssignResponse:
     ibu = _get_ibu_or_404(db, ibu_id)
 
-    if current_user.role not in {"admin", "ibu_hamil"} and current_user.id != ibu.user_id:
+    if current_user.role != "ibu_hamil" and current_user.id != ibu.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",
@@ -1101,7 +1110,8 @@ async def list_by_puskesmas(
             detail="Puskesmas tidak ditemukan",
         )
 
-    if current_user.role not in {"admin", "puskesmas", "perawat"}:
+    # Super admin dapat melihat data (read-only)
+    if current_user.role not in {"super_admin", "puskesmas", "perawat"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",
@@ -1151,7 +1161,8 @@ async def list_by_perawat(
             detail="Perawat tidak ditemukan",
         )
 
-    if current_user.role not in {"admin", "perawat", "puskesmas"}:
+    # Super admin dapat melihat data (read-only)
+    if current_user.role not in {"super_admin", "perawat", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",

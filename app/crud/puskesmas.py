@@ -87,13 +87,78 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
             raise
         return puskesmas
 
-    def suspend(
-        self, db: Session, *, puskesmas_id: int, admin_id: int, reason: str
+    def deactivate(
+        self, db: Session, *, puskesmas_id: int, super_admin_id: int, reason: Optional[str] = None
     ) -> Optional[Puskesmas]:
-        """Suspend an active Puskesmas with admin-provided reason."""
+        """
+        Deactivate (nonaktifkan) puskesmas yang sedang aktif.
+        
+        Cascade effects:
+        1. Set puskesmas_id = NULL dan perawat_id = NULL untuk semua ibu hamil di puskesmas ini
+        2. Hapus semua perawat yang terdaftar di puskesmas ini (akan cascade delete user juga)
+        3. Nonaktifkan akun admin puskesmas (set is_active = False)
+        4. Set puskesmas.is_active = False
+        
+        Args:
+            db: Database session
+            puskesmas_id: ID puskesmas yang akan dinonaktifkan
+            super_admin_id: ID super admin yang melakukan deactivation
+            reason: Alasan deactivation (optional)
+            
+        Returns:
+            Puskesmas yang sudah dinonaktifkan atau None jika tidak ditemukan
+        """
         puskesmas = self.get(db, puskesmas_id)
         if not puskesmas:
             return None
+        
+        # Pastikan puskesmas sedang aktif
+        if not puskesmas.is_active:
+            return puskesmas  # Sudah tidak aktif, return as-is
+        
+        try:
+            # 1. Unassign semua ibu hamil dari puskesmas ini (set puskesmas_id dan perawat_id = NULL)
+            ibu_hamil_list = db.scalars(
+                select(IbuHamil).where(IbuHamil.puskesmas_id == puskesmas_id)
+            ).all()
+            
+            for ibu in ibu_hamil_list:
+                ibu.puskesmas_id = None
+                ibu.perawat_id = None
+                db.add(ibu)
+            
+            # 2. Hapus semua perawat di puskesmas ini
+            # Karena FK perawat.puskesmas_id memiliki ondelete="CASCADE", 
+            # menghapus perawat akan otomatis menghapus user terkait jika ada
+            perawat_list = db.scalars(
+                select(Perawat).where(Perawat.puskesmas_id == puskesmas_id)
+            ).all()
+            
+            for perawat in perawat_list:
+                db.delete(perawat)
+            
+            # 3. Nonaktifkan akun admin puskesmas
+            if puskesmas.admin_user_id:
+                from app.models.user import User
+                admin_user = db.get(User, puskesmas.admin_user_id)
+                if admin_user:
+                    admin_user.is_active = False
+                    db.add(admin_user)
+            
+            # 4. Nonaktifkan puskesmas
+            puskesmas.is_active = False
+            if reason:
+                puskesmas.admin_notes = f"{puskesmas.admin_notes or ''}\n[Deactivated] {reason}".strip()
+            db.add(puskesmas)
+            
+            db.commit()
+            db.refresh(puskesmas)
+            
+        except Exception:
+            db.rollback()
+            raise
+        
+        return puskesmas
 
     def get_by_status(self, db: Session, *, status: str) -> List[Puskesmas]:
         """Get Puskesmas filtered by registration status."""

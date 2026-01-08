@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
-ALLOWED_ROLES = {"admin", "puskesmas", "perawat", "ibu_hamil", "kerabat"}
+ALLOWED_ROLES = {"super_admin", "puskesmas", "perawat", "ibu_hamil", "kerabat"}
 
 
 class UserBase(BaseModel):
@@ -199,6 +199,61 @@ class PuskesmasLoginResponse(BaseModel):
 				"name": "Puskesmas Sungai Penuh",
 				"registration_status": "approved",
 				"is_active": True
+			}
+		}
+	})
+
+
+# ============================================
+# Super Admin Schemas
+# ============================================
+
+class SuperAdminRegisterRequest(BaseModel):
+	"""Request body for super admin registration."""
+	email: str
+	phone: str
+	password: str
+	full_name: str
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"email": "superadmin@wellmom.go.id",
+			"phone": "+6281234567890",
+			"password": "SuperSecurePass123!",
+			"full_name": "Super Admin WellMom"
+		}
+	})
+
+
+class SuperAdminLoginRequest(BaseModel):
+	"""Request body for super admin login."""
+	email: str
+	password: str
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"email": "superadmin@wellmom.go.id",
+			"password": "SuperSecurePass123!",
+		}
+	})
+
+
+class SuperAdminLoginResponse(BaseModel):
+	"""Response body for successful super admin login."""
+	access_token: str
+	token_type: str = "bearer"
+	role: str
+	user: PuskesmasLoginUserInfo  # Reuse same structure
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+			"token_type": "bearer",
+			"role": "super_admin",
+			"user": {
+				"id": 1,
+				"email": "superadmin@wellmom.go.id",
+				"full_name": "Super Admin WellMom"
 			}
 		}
 	})

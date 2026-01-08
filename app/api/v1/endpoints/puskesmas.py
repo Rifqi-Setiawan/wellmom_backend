@@ -3,7 +3,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,10 @@ router = APIRouter(
 
 class RejectionReason(BaseModel):
     rejection_reason: str
+
+
+class DeactivationReason(BaseModel):
+    reason: str = Field(..., min_length=5, description="Alasan deactivation puskesmas")
 
 
 class NearestPuskesmasResponse(BaseModel):
@@ -66,7 +70,13 @@ async def register_puskesmas(
     puskesmas_in: PuskesmasCreate,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Public registration for Puskesmas. Creates linked user with role 'puskesmas'."""
+    """
+    Public registration for Puskesmas.
+    
+    Membuat satu akun admin puskesmas yang akan mengelola puskesmas tersebut.
+    Setiap puskesmas hanya memiliki satu akun admin puskesmas (role: 'puskesmas').
+    Akun ini digunakan untuk mengelola perawat dan assign ibu hamil ke perawat.
+    """
     # Prevent duplicate phone on user table
     existing_user = crud_user.get_by_phone(db, phone=puskesmas_in.phone)
     if existing_user:
@@ -134,7 +144,7 @@ async def list_puskesmas(
     summary="Admin list active puskesmas with stats",
 )
 async def admin_list_active_puskesmas(
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> List[PuskesmasAdminResponse]:
     """Admin-only list of approved & active puskesmas with aggregated counts."""
@@ -150,7 +160,7 @@ async def admin_list_active_puskesmas(
 )
 async def admin_get_puskesmas(
     puskesmas_id: int,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> PuskesmasAdminResponse:
     """Admin-only detail including counts of ibu hamil and perawat."""
@@ -222,7 +232,7 @@ async def get_puskesmas(
     summary="List pending registrations",
 )
 async def list_pending_puskesmas(
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> List[Puskesmas]:
     """Admin-only view of pending registrations."""
@@ -234,10 +244,17 @@ async def list_pending_puskesmas(
     response_model=PuskesmasResponse,
     status_code=status.HTTP_200_OK,
     summary="Approve registration",
+    description="""
+Approve registrasi puskesmas.
+
+**Akses:**
+- Admin sistem
+- Super admin (dapat approve/reject registrasi puskesmas)
+""",
 )
 async def approve_puskesmas(
     puskesmas_id: int,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> Puskesmas:
     """Approve a pending puskesmas and notify admin user."""
@@ -271,11 +288,18 @@ async def approve_puskesmas(
     response_model=PuskesmasResponse,
     status_code=status.HTTP_200_OK,
     summary="Reject registration",
+    description="""
+Reject registrasi puskesmas dengan alasan.
+
+**Akses:**
+- Admin sistem
+- Super admin (dapat approve/reject registrasi puskesmas)
+""",
 )
 async def reject_puskesmas(
     puskesmas_id: int,
     payload: RejectionReason,
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ) -> Puskesmas:
     """Reject a puskesmas registration with reason and notify admin user."""
@@ -305,6 +329,136 @@ async def reject_puskesmas(
 
 
 @router.post(
+    "/{puskesmas_id}/deactivate",
+    response_model=PuskesmasResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Deactivate puskesmas",
+    description="""
+Nonaktifkan puskesmas yang sedang aktif.
+
+**Akses:**
+- Super admin only
+
+**Cascade Effects:**
+1. Semua ibu hamil yang ter-assign ke puskesmas ini akan kehilangan relasi (puskesmas_id = NULL, perawat_id = NULL)
+2. Semua perawat yang terdaftar di puskesmas ini akan otomatis terhapus (beserta akun usernya jika ada)
+3. Akun admin puskesmas akan dinonaktifkan (is_active = False)
+4. Puskesmas akan dinonaktifkan (is_active = False)
+
+**Catatan:**
+- Ibu hamil yang kehilangan relasi harus memilih puskesmas aktif baru
+- Perawat yang terhapus tidak dapat diakses lagi
+- Admin puskesmas tidak dapat login setelah puskesmas dinonaktifkan
+""",
+    responses={
+        200: {
+            "description": "Puskesmas berhasil dinonaktifkan",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "name": "Puskesmas Sungai Penuh",
+                        "is_active": False,
+                        "registration_status": "approved",
+                        "admin_notes": "[Deactivated] Melanggar ketentuan operasional"
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized. Hanya super admin yang dapat menonaktifkan puskesmas."}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas not found"}
+                }
+            }
+        },
+        400: {
+            "description": "Puskesmas sudah tidak aktif",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas sudah tidak aktif"}
+                }
+            }
+        }
+    }
+)
+async def deactivate_puskesmas(
+    puskesmas_id: int,
+    payload: DeactivationReason,
+    current_user: User = Depends(require_role("super_admin")),
+    db: Session = Depends(get_db),
+) -> Puskesmas:
+    """
+    Deactivate (nonaktifkan) puskesmas yang sedang aktif.
+    
+    Hanya super admin yang dapat mengakses endpoint ini.
+    
+    Args:
+        puskesmas_id: ID puskesmas yang akan dinonaktifkan
+        payload: Alasan deactivation
+        current_user: Super admin user
+        db: Database session
+        
+    Returns:
+        Puskesmas: Data puskesmas yang sudah dinonaktifkan
+        
+    Raises:
+        HTTPException 400: Puskesmas sudah tidak aktif
+        HTTPException 403: Tidak memiliki akses
+        HTTPException 404: Puskesmas tidak ditemukan
+    """
+    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas not found",
+        )
+    
+    if not puskesmas.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Puskesmas sudah tidak aktif",
+        )
+    
+    # Deactivate puskesmas dengan cascade logic
+    puskesmas = crud_puskesmas.deactivate(
+        db,
+        puskesmas_id=puskesmas_id,
+        super_admin_id=current_user.id,
+        reason=payload.reason,
+    )
+    
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas not found",
+        )
+    
+    # Notify admin puskesmas jika ada
+    if puskesmas.admin_user_id:
+        notification_in = NotificationCreate(
+            user_id=puskesmas.admin_user_id,
+            title="Puskesmas Dinonaktifkan",
+            message=f"Puskesmas {puskesmas.name} telah dinonaktifkan. Alasan: {payload.reason}",
+            notification_type="system",
+            priority="high",
+            sent_via="in_app",
+        )
+        crud_notification.create(db, obj_in=notification_in)
+    
+    return puskesmas
+
+
+@router.post(
     "/{puskesmas_id}/ibu-hamil/{ibu_id}/assign",
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
@@ -312,9 +466,13 @@ async def reject_puskesmas(
     description="""
 Menugaskan satu ibu hamil ke puskesmas tertentu.
 
+**Konsep:**
+- Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
+- Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+
 **Siapa yang dapat mengakses:**
-- Admin sistem
-- Admin puskesmas (hanya untuk puskesmas yang dikelolanya)
+- Admin sistem (dapat assign ke puskesmas manapun)
+- Admin puskesmas (hanya dapat assign ke puskesmas yang dikelolanya sendiri)
 
 **Catatan:**
 - Puskesmas harus dalam status 'approved' dan aktif
@@ -383,17 +541,25 @@ async def assign_ibu_hamil_to_puskesmas(
     """
     Assign ibu hamil ke puskesmas tertentu.
 
+    Hanya admin sistem atau admin puskesmas yang dapat mengakses endpoint ini.
+    Admin puskesmas hanya dapat assign ke puskesmas yang dikelolanya sendiri.
+
     Args:
         puskesmas_id: ID puskesmas tujuan
         ibu_id: ID ibu hamil yang akan di-assign
-        current_user: User yang sedang login
+        current_user: User yang sedang login (admin atau admin puskesmas)
         db: Database session
 
     Returns:
-        IbuHamil: Data ibu hamil yang sudah di-update
+        IbuHamil: Data ibu hamil yang sudah di-update dengan puskesmas_id baru
     """
-    # Authorization check
-    if current_user.role not in {"admin", "puskesmas"}:
+    # Authorization check: hanya super admin atau admin puskesmas
+    # Super admin TIDAK dapat assign (hanya bisa approve/reject registrasi puskesmas)
+    if current_user.role not in {"super_admin", "puskesmas"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized. Super admin hanya dapat approve/reject registrasi puskesmas.",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",
@@ -407,7 +573,8 @@ async def assign_ibu_hamil_to_puskesmas(
             detail="Puskesmas tidak ditemukan atau belum aktif",
         )
 
-    # Check if puskesmas admin is trying to assign to their own puskesmas
+    # Validasi: Admin puskesmas hanya dapat assign untuk puskesmas yang dikelolanya sendiri
+    # Setiap puskesmas memiliki satu admin puskesmas (admin_user_id)
     if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -452,14 +619,18 @@ async def assign_ibu_hamil_to_puskesmas(
     description="""
 Menugaskan satu ibu hamil ke perawat yang terdaftar di puskesmas tersebut.
 
+**Konsep:**
+- Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
+- Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+
 **Prasyarat:**
 - Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
 - Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
 - Perawat harus aktif dan memiliki kapasitas
 
 **Siapa yang dapat mengakses:**
-- Admin sistem
-- Admin puskesmas (hanya untuk puskesmas yang dikelolanya)
+- Admin sistem (dapat assign ke puskesmas manapun)
+- Admin puskesmas (hanya dapat assign untuk puskesmas yang dikelolanya sendiri)
 
 **Catatan:**
 - Gunakan endpoint `/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign` terlebih dahulu jika ibu hamil belum ter-assign ke puskesmas
@@ -549,11 +720,14 @@ async def assign_ibu_hamil_to_perawat(
     """
     Assign ibu hamil ke perawat yang terdaftar di puskesmas tersebut.
 
+    Hanya admin sistem atau admin puskesmas yang dapat mengakses endpoint ini.
+    Admin puskesmas hanya dapat assign untuk puskesmas yang dikelolanya sendiri.
+
     Args:
         puskesmas_id: ID puskesmas
         ibu_id: ID ibu hamil yang akan di-assign
         perawat_id: ID perawat tujuan
-        current_user: User yang sedang login
+        current_user: User yang sedang login (admin atau admin puskesmas)
         db: Database session
 
     Returns:
@@ -564,11 +738,12 @@ async def assign_ibu_hamil_to_perawat(
         HTTPException 403: Tidak memiliki akses
         HTTPException 404: Ibu hamil atau perawat tidak ditemukan
     """
-    # Authorization check
-    if current_user.role not in {"admin", "puskesmas"}:
+    # Authorization check: hanya super admin atau admin puskesmas
+    # Super admin TIDAK dapat assign (hanya bisa approve/reject registrasi puskesmas)
+    if current_user.role not in {"super_admin", "puskesmas"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized",
+            detail="Not authorized. Super admin hanya dapat approve/reject registrasi puskesmas.",
         )
 
     # Get puskesmas
@@ -579,7 +754,8 @@ async def assign_ibu_hamil_to_perawat(
             detail="Puskesmas tidak ditemukan atau belum aktif",
         )
 
-    # Check if puskesmas admin is trying to assign to their own puskesmas
+    # Validasi: Admin puskesmas hanya dapat assign untuk puskesmas yang dikelolanya sendiri
+    # Setiap puskesmas memiliki satu admin puskesmas (admin_user_id)
     if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

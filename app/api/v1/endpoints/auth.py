@@ -22,6 +22,9 @@ from app.schemas.user import (
     PuskesmasLoginResponse,
     PuskesmasLoginUserInfo,
     PuskesmasLoginPuskesmasInfo,
+    SuperAdminRegisterRequest,
+    SuperAdminLoginRequest,
+    SuperAdminLoginResponse,
 )
 
 router = APIRouter(
@@ -332,6 +335,213 @@ async def login_puskesmas(
             name=puskesmas.name,
             registration_status=puskesmas.registration_status,
             is_active=puskesmas.is_active,
+        ),
+    )
+
+
+@router.post(
+    "/register/super-admin",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register Super Admin",
+    description="""
+Registrasi akun super admin baru.
+
+**Catatan Penting:**
+- Super admin memiliki akses untuk approve/reject registrasi puskesmas
+- Super admin hanya dapat melihat data perawat dan ibu hamil (read-only)
+- Super admin TIDAK dapat mengelola perawat atau assign ibu hamil
+- Endpoint ini sebaiknya hanya digunakan untuk setup awal sistem
+""",
+)
+async def register_super_admin(
+    user_in: SuperAdminRegisterRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Register a new super admin account.
+    
+    Args:
+        user_in: Super admin registration data (email, phone, password, full_name)
+        db: Database session
+        
+    Returns:
+        dict: Created user data, access token, and token type
+        
+    Raises:
+        HTTPException: 400 if email or phone already registered
+    """
+    # Check if email already exists
+    existing_user_email = crud_user.get_by_email(db, email=user_in.email)
+    if existing_user_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+    
+    # Check if phone already exists
+    existing_user_phone = crud_user.get_by_phone(db, phone=user_in.phone)
+    if existing_user_phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone number already registered",
+        )
+    
+    # Create super admin user
+    user_data = UserCreate(
+        email=user_in.email,
+        phone=user_in.phone,
+        password=user_in.password,
+        full_name=user_in.full_name,
+        role="super_admin",
+    )
+    db_user = crud_user.create_user(db, user_in=user_data)
+    
+    # Generate access token
+    access_token_expires = timedelta(days=30)
+    access_token = create_access_token(
+        data={"sub": db_user.phone, "user_id": db_user.id, "role": db_user.role},
+        expires_delta=access_token_expires,
+    )
+    
+    return {
+        "user": UserResponse.from_orm(db_user),
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post(
+    "/login/super-admin",
+    response_model=SuperAdminLoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Login sebagai Super Admin",
+    description="""
+Login endpoint khusus untuk super admin menggunakan email dan password.
+
+## Persyaratan Login
+
+1. **User harus memiliki role `super_admin`**
+2. **Akun harus aktif** (`is_active = true`)
+
+## Alur Validasi
+
+1. Validasi email dan password
+2. Cek status aktif akun user
+3. Verifikasi role user adalah 'super_admin'
+4. Generate JWT access token
+
+## Response Sukses
+
+Mengembalikan JWT token beserta informasi user.
+Token berlaku selama 30 hari.
+
+## Akses Super Admin
+
+- ✅ Dapat approve/reject registrasi puskesmas
+- ✅ Dapat melihat data puskesmas, perawat, dan ibu hamil (read-only)
+- ❌ TIDAK dapat mengelola perawat
+- ❌ TIDAK dapat assign ibu hamil ke puskesmas atau perawat
+""",
+    responses={
+        200: {
+            "description": "Login berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "token_type": "bearer",
+                        "role": "super_admin",
+                        "user": {
+                            "id": 1,
+                            "email": "superadmin@wellmom.go.id",
+                            "full_name": "Super Admin WellMom"
+                        }
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Email/password salah atau akun tidak aktif",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_credentials": {
+                            "summary": "Email atau password salah",
+                            "value": {"detail": "Email atau password salah"}
+                        },
+                        "inactive_account": {
+                            "summary": "Akun tidak aktif",
+                            "value": {"detail": "Akun pengguna tidak aktif"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Role bukan super_admin",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Akun ini bukan akun super admin"
+                    }
+                }
+            }
+        },
+        422: {
+            "description": "Validation Error - Format request tidak valid"
+        }
+    },
+)
+async def login_super_admin(
+    login_data: SuperAdminLoginRequest,
+    db: Session = Depends(get_db),
+) -> SuperAdminLoginResponse:
+    """
+    Login endpoint untuk super admin.
+
+    Hanya user dengan role 'super_admin' yang dapat login melalui endpoint ini.
+    """
+    # Step 1: Authenticate user by email and password
+    user = crud_user.authenticate_by_email(db, email=login_data.email, password=login_data.password)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email atau password salah",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Step 2: Check if user account is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Akun pengguna tidak aktif",
+        )
+
+    # Step 3: Verify user has super_admin role
+    if user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun ini bukan akun super admin",
+        )
+
+    # Step 4: Generate access token
+    access_token_expires = timedelta(days=30)
+    access_token = create_access_token(
+        data={"sub": user.phone, "user_id": user.id, "role": user.role},
+        expires_delta=access_token_expires,
+    )
+
+    # Step 5: Build response
+    return SuperAdminLoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        role=user.role,
+        user=PuskesmasLoginUserInfo(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
         ),
     )
 
