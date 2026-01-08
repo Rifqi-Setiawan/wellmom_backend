@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, require_role
@@ -125,7 +125,7 @@ def get_health_records_by_date(
 )
 def get_health_records_last_7_days(
     ibu_hamil_id: int,
-    category: str = Query(
+    category: str = Path(
         ...,
         description="Category filter: blood_pressure, blood_glucose, temperature, or heart_rate",
         regex="^(blood_pressure|blood_glucose|temperature|heart_rate)$"
