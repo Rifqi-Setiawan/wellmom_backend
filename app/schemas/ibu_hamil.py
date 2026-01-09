@@ -290,42 +290,109 @@ class IbuHamilUpdate(BaseModel):
     })
 
 
-class IbuHamilResponse(IbuHamilBase):
-    """Schema for IbuHamil API responses - includes all fields + metadata"""
+class IbuHamilResponse(BaseModel):
+    """Schema for IbuHamil API responses - includes all fields + metadata
+    
+    NOTE: This class does NOT inherit from IbuHamilBase to avoid validator conflicts
+    with PostGIS WKBElement conversion.
+    """
+    # IDs
     id: int
-    user_id: int  # ✅ NOW it's here (output only)
+    user_id: int
     puskesmas_id: Optional[int] = None
     perawat_id: Optional[int] = None
     assigned_by_user_id: Optional[int] = None
+    
+    # Identitas Pribadi
+    nama_lengkap: str
+    nik: str
+    date_of_birth: date
+    age: Optional[int] = None
+    blood_type: Optional[str] = None
+    profile_photo_url: Optional[str] = None
+    
+    # Data Kehamilan
+    last_menstrual_period: Optional[date] = None
+    estimated_due_date: Optional[date] = None
+    usia_kehamilan: Optional[int] = None
+    kehamilan_ke: Optional[int] = None
+    jumlah_anak: Optional[int] = None
+    miscarriage_number: Optional[int] = None
+    jarak_kehamilan_terakhir: Optional[str] = None
+    previous_pregnancy_complications: Optional[str] = None
+    pernah_caesar: Optional[bool] = None
+    pernah_perdarahan_saat_hamil: Optional[bool] = None
+    
+    # Alamat & Lokasi - Accept Any for WKBElement conversion
+    address: str
+    provinsi: Optional[str] = None
+    kota_kabupaten: Optional[str] = None
+    kelurahan: Optional[str] = None
+    kecamatan: Optional[str] = None
+    location: Any  # Will be converted from WKBElement to tuple
+    
+    # Kontak Darurat
+    emergency_contact_name: str
+    emergency_contact_phone: str
+    emergency_contact_relation: Optional[str] = None
+    
+    # Riwayat Kesehatan (flattened from model)
+    darah_tinggi: Optional[bool] = None
+    diabetes: Optional[bool] = None
+    anemia: Optional[bool] = None
+    penyakit_jantung: Optional[bool] = None
+    asma: Optional[bool] = None
+    penyakit_ginjal: Optional[bool] = None
+    tbc_malaria: Optional[bool] = None
+    
+    # Risk & Assignment
+    risk_level: Optional[str] = None
     assignment_date: Optional[datetime] = None
     assignment_distance_km: Optional[float] = None
     assignment_method: Optional[str] = None
+    
+    # Preferences
+    healthcare_preference: Optional[str] = None
+    whatsapp_consent: Optional[bool] = None
+    data_sharing_consent: Optional[bool] = None
+    
+    # Status & Timestamps
     is_active: bool = True
     created_at: datetime
     updated_at: datetime
 
-    @field_serializer('location')
-    def serialize_location(self, location: Any, _info) -> Optional[Tuple[float, float]]:
-        """Convert PostGIS Geography POINT to (longitude, latitude) tuple"""
-        if location is None:
+    @field_validator('location', mode='before')
+    @classmethod
+    def convert_location_from_wkb(cls, v: Any) -> Optional[Tuple[float, float]]:
+        """Convert PostGIS WKBElement to tuple before validation"""
+        if v is None:
             return None
         
-        # If already a tuple (from schema), return as-is
-        if isinstance(location, tuple):
-            return location
+        # If already a tuple/list, convert to tuple
+        if isinstance(v, (tuple, list)):
+            return tuple(v)
         
         # If WKBElement (from PostGIS), parse it
-        if isinstance(location, WKBElement):
-            point = wkb.loads(bytes(location.data))
+        if isinstance(v, WKBElement):
+            point = wkb.loads(bytes(v.data))
             return (point.x, point.y)  # (longitude, latitude)
         
         # If string (WKT format like 'POINT(101.3912 -2.0645)')
-        if isinstance(location, str):
+        if isinstance(v, str):
             import re
-            match = re.match(r'POINT\(([0-9.\-]+)\s+([0-9.\-]+)\)', location)
+            match = re.match(r'POINT\(([0-9.\-]+)\s+([0-9.\-]+)\)', v)
             if match:
                 return (float(match.group(1)), float(match.group(2)))
         
+        return v
+
+    @field_serializer('location')
+    def serialize_location(self, location: Any, _info) -> Optional[list]:
+        """Serialize location to JSON array [longitude, latitude]"""
+        if location is None:
+            return None
+        if isinstance(location, (tuple, list)):
+            return list(location)
         return None
 
     model_config = ConfigDict(from_attributes=True, json_schema_extra={
@@ -338,7 +405,7 @@ class IbuHamilResponse(IbuHamilBase):
             "profile_photo_url": "/photos/ibu_hamil/1.jpg",
             "puskesmas_id": 1,
             "perawat_id": 1,
-            "location": (101.3912, -2.0645),
+            "location": [101.3912, -2.0645],
             "address": "Jl. Mawar No. 10",
             "provinsi": "Jambi",
             "created_at": "2025-01-01T10:00:00Z",

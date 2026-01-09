@@ -490,8 +490,8 @@ async def register_ibu_hamil(
         # Build response
         try:
             return {
-                "ibu_hamil": IbuHamilResponse.from_orm(ibu_obj),
-                "user": UserResponse.from_orm(user_obj),
+                "ibu_hamil": IbuHamilResponse.model_validate(ibu_obj),
+                "user": UserResponse.model_validate(user_obj),
                 "access_token": token,
                 "token_type": "bearer",
                 "message": "Registrasi berhasil. Silakan pilih puskesmas terdekat untuk melanjutkan.",
@@ -1098,8 +1098,8 @@ async def auto_assign(
     assigned_ibu, puskesmas, distance = _auto_assign_nearest(db, ibu)
 
     return AutoAssignResponse(
-        ibu_hamil=IbuHamilResponse.from_orm(assigned_ibu),
-        puskesmas=PuskesmasResponse.from_orm(puskesmas),
+        ibu_hamil=IbuHamilResponse.model_validate(assigned_ibu),
+        puskesmas=PuskesmasResponse.model_validate(puskesmas),
         distance_km=distance,
     )
 
