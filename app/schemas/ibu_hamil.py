@@ -118,7 +118,6 @@ class IbuHamilBase(BaseModel):
     kota_kabupaten: Optional[str] = None
     kelurahan: Optional[str] = None
     kecamatan: Optional[str] = None
-    rt_rw: Optional[str] = None
     
     # Data Kehamilan
     last_menstrual_period: Optional[date] = None  # HPHT
@@ -143,10 +142,6 @@ class IbuHamilBase(BaseModel):
     # Optional fields
     age: Optional[int] = None
     blood_type: Optional[str] = None
-    height_cm: Optional[float] = None
-    pre_pregnancy_weight_kg: Optional[float] = None
-    medical_history: Optional[str] = None
-    current_medications: Optional[str] = None
     risk_level: Optional[str] = "normal"
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = True
@@ -181,7 +176,6 @@ class IbuHamilBase(BaseModel):
             "kota_kabupaten": "Kerinci",
             "kelurahan": "Sungai Penuh",
             "kecamatan": "Pesisir Bukit",
-            "rt_rw": "02/05",
             "location": (101.3912, -2.0645),
             "last_menstrual_period": "2024-12-01",
             "estimated_due_date": "2025-09-08",
@@ -205,10 +199,6 @@ class IbuHamilBase(BaseModel):
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
             "emergency_contact_relation": "Suami",
-            "height_cm": 158.0,
-            "pre_pregnancy_weight_kg": 55.0,
-            "medical_history": "Tidak ada penyakit kronis",
-            "current_medications": "Multivitamin prenatal",
             "risk_level": "normal",
             "healthcare_preference": "puskesmas",
             "whatsapp_consent": True,
@@ -252,15 +242,10 @@ class IbuHamilUpdate(BaseModel):
     kota_kabupaten: Optional[str] = None
     kelurahan: Optional[str] = None
     kecamatan: Optional[str] = None
-    rt_rw: Optional[str] = None
     location: Optional[Tuple[float, float]] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     emergency_contact_relation: Optional[str] = None
-    height_cm: Optional[float] = None
-    pre_pregnancy_weight_kg: Optional[float] = None
-    medical_history: Optional[str] = None
-    current_medications: Optional[str] = None
     risk_level: Optional[str] = None
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = None
@@ -301,7 +286,6 @@ class IbuHamilUpdate(BaseModel):
             "perawat_id": 2,
             "location": (101.4, -2.1),
             "risk_level": "high",
-            "current_medications": "Vitamin D, Asam folat",
         }
     })
 

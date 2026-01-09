@@ -1811,7 +1811,6 @@ Content-Type: application/json
     "kota_kabupaten": "Kerinci",
     "kelurahan": "Sungai Penuh",
     "kecamatan": "Pesisir Bukit",
-    "rt_rw": "02/05",
     "location": [101.3912, -2.0645],
     "last_menstrual_period": "2024-12-01",
     "estimated_due_date": "2025-09-08",
@@ -1836,8 +1835,6 @@ Content-Type: application/json
     "emergency_contact_phone": "+6281234567890",
     "emergency_contact_relation": "Suami",
     "blood_type": "O+",
-    "height_cm": 158.0,
-    "pre_pregnancy_weight_kg": 55.0,
     "house_photo_url": "/files/rumah_ibu.jpg"
   }
 }
@@ -1866,7 +1863,6 @@ Content-Type: application/json
 | kota_kabupaten | string | No | Kota/Kabupaten tempat tinggal |
 | kelurahan | string | No | Kelurahan/Desa |
 | kecamatan | string | No | Kecamatan |
-| rt_rw | string | No | RT/RW |
 | location | array | Yes | [longitude, latitude] - Koordinat lokasi |
 | last_menstrual_period | date | No | HPHT - Hari Pertama Haid Terakhir |
 | estimated_due_date | date | No | HPL - Hari Perkiraan Lahir |
@@ -1883,8 +1879,6 @@ Content-Type: application/json
 | emergency_contact_phone | string | Yes | Nomor telepon kontak darurat |
 | emergency_contact_relation | string | No | Hubungan dengan kontak darurat |
 | blood_type | string | No | Golongan darah |
-| height_cm | number | No | Tinggi badan dalam cm |
-| pre_pregnancy_weight_kg | number | No | Berat badan sebelum hamil dalam kg |
 | house_photo_url | string | No | URL foto rumah |
 
 **Riwayat Kesehatan Ibu Object:**
@@ -1920,7 +1914,6 @@ Content-Type: application/json
     "kota_kabupaten": "Kerinci",
     "kelurahan": "Sungai Penuh",
     "kecamatan": "Pesisir Bukit",
-    "rt_rw": "02/05",
     "last_menstrual_period": "2024-12-01",
     "estimated_due_date": "2025-09-08",
     "usia_kehamilan": 8,
@@ -1944,8 +1937,6 @@ Content-Type: application/json
     "emergency_contact_phone": "+6281234567890",
     "emergency_contact_relation": "Suami",
     "blood_type": "O+",
-    "height_cm": 158.0,
-    "pre_pregnancy_weight_kg": 55.0,
     "house_photo_url": "/files/rumah_ibu.jpg",
     "is_active": true,
     "created_at": "2025-01-01T10:00:00Z",

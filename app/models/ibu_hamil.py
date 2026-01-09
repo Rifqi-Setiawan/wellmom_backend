@@ -42,7 +42,6 @@ class IbuHamil(Base):
     kota_kabupaten = Column(String(100))
     kelurahan = Column(String(100))
     kecamatan = Column(String(100))
-    rt_rw = Column(String(20))
     location = Column(Geography(geometry_type='POINT', srid=4326), nullable=False)
     
     # Kontak Darurat
@@ -58,10 +57,6 @@ class IbuHamil(Base):
     asma = Column(Boolean, default=False)
     penyakit_ginjal = Column(Boolean, default=False)
     tbc_malaria = Column(Boolean, default=False)
-    height_cm = Column(Float)
-    pre_pregnancy_weight_kg = Column(Float)
-    medical_history = Column(Text)
-    current_medications = Column(Text)
     
     # Risk Assessment
     risk_level = Column(String(20), default='normal', index=True)
