@@ -1520,21 +1520,22 @@ Authorization: Bearer <token>
 ### 12. Assign Ibu Hamil ke Puskesmas
 
 **Deskripsi Endpoint:**
-- Menugaskan satu ibu hamil ke puskesmas tertentu secara manual
+- Menugaskan satu ibu hamil ke puskesmas tertentu
 - **Konsep:** Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
-- Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+- Ibu hamil dapat memilih sendiri puskesmas yang ingin dituju
 - Dapat diakses oleh:
   - Admin puskesmas (hanya dapat assign ke puskesmas yang dikelolanya sendiri)
+  - Ibu hamil (hanya dapat assign dirinya sendiri ke puskesmas manapun yang aktif)
 - **Catatan:** Super admin TIDAK dapat assign (hanya dapat approve/reject registrasi puskesmas)
 - Puskesmas harus dalam status 'approved' dan aktif
 - Setelah assign ke puskesmas, ibu hamil belum memiliki perawat yang menangani
-- Mengirim notifikasi ke user ibu hamil
+- Notifikasi dikirim ke ibu hamil jika di-assign oleh admin puskesmas
 
 **Request Details:**
 
 - **HTTP Method:** POST
 - **URL Path:** `/api/v1/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign`
-- **Authentication:** **Required** (Bearer Token - Puskesmas Admin Only)
+- **Authentication:** **Required** (Bearer Token - Puskesmas Admin atau Ibu Hamil)
 - **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
 
 **Headers:**
@@ -1592,6 +1593,22 @@ Authorization: Bearer <token>
 ```json
 {
   "detail": "Not authorized"
+}
+```
+
+atau (jika ibu hamil mencoba assign ibu hamil lain):
+
+```json
+{
+  "detail": "Anda hanya dapat assign diri sendiri ke puskesmas"
+}
+```
+
+atau (jika admin puskesmas mencoba assign ke puskesmas lain):
+
+```json
+{
+  "detail": "Not authorized to assign for this puskesmas"
 }
 ```
 

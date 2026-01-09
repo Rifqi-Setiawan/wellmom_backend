@@ -296,21 +296,33 @@ def _auto_assign_nearest(
             }
         },
         400: {
-            "description": "Data tidak valid atau NIK sudah terdaftar",
+            "description": "Data tidak valid atau sudah terdaftar",
             "content": {
                 "application/json": {
                     "examples": {
                         "nik_exists": {
                             "summary": "NIK sudah terdaftar",
-                            "value": {"detail": "NIK sudah terdaftar di sistem"}
+                            "value": {"detail": "NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali."}
                         },
-                        "phone_exists": {
-                            "summary": "Nomor telepon sudah terdaftar",
-                            "value": {"detail": "Nomor telepon sudah terdaftar dengan role berbeda"}
+                        "phone_different_role": {
+                            "summary": "Nomor telepon terdaftar dengan role berbeda",
+                            "value": {"detail": "Nomor telepon sudah terdaftar dengan role perawat. Silakan gunakan nomor lain atau login dengan akun yang ada."}
+                        },
+                        "phone_already_ibu_hamil": {
+                            "summary": "Nomor telepon sudah terdaftar sebagai ibu hamil",
+                            "value": {"detail": "Nomor telepon ini sudah terdaftar sebagai ibu hamil. Silakan login menggunakan akun yang ada."}
+                        },
+                        "email_different_role": {
+                            "summary": "Email terdaftar dengan role berbeda",
+                            "value": {"detail": "Email sudah terdaftar dengan role perawat. Silakan gunakan email lain."}
+                        },
+                        "email_already_ibu_hamil": {
+                            "summary": "Email sudah terdaftar sebagai ibu hamil",
+                            "value": {"detail": "Email ini sudah terdaftar sebagai ibu hamil. Silakan login menggunakan akun yang ada."}
                         },
                         "invalid_location": {
                             "summary": "Koordinat lokasi tidak valid",
-                            "value": {"detail": "Koordinat lokasi harus berupa [longitude, latitude] dengan range yang valid"}
+                            "value": {"detail": "Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90."}
                         }
                     }
                 }
@@ -350,19 +362,20 @@ async def register_ibu_hamil(
     Registrasi ibu hamil baru dengan validasi lengkap.
     
     Proses registrasi:
-    1. Validasi data input (NIK, phone, location)
-    2. Cek apakah phone sudah terdaftar
-    3. Cek apakah NIK sudah terdaftar
-    4. Buat user account (jika belum ada)
-    5. Buat profil ibu hamil
-    6. Auto-assign ke Puskesmas terdekat (jika lokasi tersedia)
-    7. Generate access token
+    1. Validasi data input (NIK, phone, email, location)
+    2. Cek apakah phone sudah terdaftar (jika sudah sebagai ibu hamil, tolak)
+    3. Cek apakah email sudah terdaftar (jika sudah sebagai ibu hamil, tolak)
+    4. Cek apakah NIK sudah terdaftar
+    5. Buat user account (jika belum ada)
+    6. Buat profil ibu hamil
+    7. Auto-assign ke Puskesmas terdekat (jika lokasi tersedia)
+    8. Generate access token
     
     Returns:
         dict: User info, ibu hamil profile, access token, dan assignment info
     
     Raises:
-        HTTPException 400: NIK/phone sudah terdaftar atau data tidak valid
+        HTTPException 400: NIK/phone/email sudah terdaftar atau data tidak valid
         HTTPException 422: Validation error pada input
         HTTPException 500: Database atau server error
     """
@@ -378,8 +391,32 @@ async def register_ibu_hamil(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Nomor telepon sudah terdaftar dengan role {existing_user.role}. Silakan gunakan nomor lain atau login dengan akun yang ada."
                 )
+            # Check if this user already has an ibu_hamil profile
+            existing_ibu_for_user = db.query(IbuHamil).filter(IbuHamil.user_id == existing_user.id).first()
+            if existing_ibu_for_user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nomor telepon ini sudah terdaftar sebagai ibu hamil. Silakan login menggunakan akun yang ada."
+                )
             user_obj = existing_user
         else:
+            # Validate: Check if email already exists (if provided)
+            if user_in.email:
+                existing_user_by_email = crud_user.get_by_email(db, email=user_in.email)
+                if existing_user_by_email:
+                    if existing_user_by_email.role != "ibu_hamil":
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Email sudah terdaftar dengan role {existing_user_by_email.role}. Silakan gunakan email lain."
+                        )
+                    # Check if this user already has an ibu_hamil profile
+                    existing_ibu_for_email_user = db.query(IbuHamil).filter(IbuHamil.user_id == existing_user_by_email.id).first()
+                    if existing_ibu_for_email_user:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Email ini sudah terdaftar sebagai ibu hamil. Silakan login menggunakan akun yang ada."
+                        )
+            
             # Create new user
             try:
                 user_obj = crud_user.create_user(db, user_in=user_in)

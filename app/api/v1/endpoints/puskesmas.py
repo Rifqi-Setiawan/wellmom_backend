@@ -469,16 +469,18 @@ Menugaskan satu ibu hamil ke puskesmas tertentu.
 **Konsep:**
 - Setiap puskesmas memiliki satu akun admin puskesmas (role: 'puskesmas')
 - Admin puskesmas dapat mengelola perawat dan assign ibu hamil ke perawat di puskesmasnya
+- Ibu hamil dapat memilih sendiri puskesmas yang ingin dituju
 
 **Siapa yang dapat mengakses:**
-- Admin sistem (dapat assign ke puskesmas manapun)
 - Admin puskesmas (hanya dapat assign ke puskesmas yang dikelolanya sendiri)
+- Ibu hamil (hanya dapat assign dirinya sendiri ke puskesmas manapun yang aktif)
 
 **Catatan:**
 - Puskesmas harus dalam status 'approved' dan aktif
 - Endpoint ini untuk assign ibu hamil ke puskesmas tertentu
 - Setelah assign ke puskesmas, ibu hamil belum memiliki perawat yang menangani
 - Untuk assign ke perawat, gunakan endpoint `/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign-perawat/{perawat_id}`
+- Super admin tidak dapat assign (hanya bisa approve/reject registrasi puskesmas)
 """,
     responses={
         200: {
@@ -502,12 +504,16 @@ Menugaskan satu ibu hamil ke puskesmas tertentu.
                 "application/json": {
                     "examples": {
                         "not_authorized": {
-                            "summary": "Bukan admin atau admin puskesmas",
+                            "summary": "Role tidak diizinkan",
                             "value": {"detail": "Not authorized"}
                         },
                         "wrong_puskesmas": {
                             "summary": "Admin puskesmas mencoba assign ke puskesmas lain",
                             "value": {"detail": "Not authorized to assign for this puskesmas"}
+                        },
+                        "ibu_hamil_not_self": {
+                            "summary": "Ibu hamil mencoba assign ibu hamil lain",
+                            "value": {"detail": "Anda hanya dapat assign diri sendiri ke puskesmas"}
                         }
                     }
                 }
@@ -541,44 +547,24 @@ async def assign_ibu_hamil_to_puskesmas(
     """
     Assign ibu hamil ke puskesmas tertentu.
 
-    Hanya admin sistem atau admin puskesmas yang dapat mengakses endpoint ini.
-    Admin puskesmas hanya dapat assign ke puskesmas yang dikelolanya sendiri.
+    Role yang dapat mengakses:
+    - Admin puskesmas: hanya dapat assign ke puskesmas yang dikelolanya sendiri
+    - Ibu hamil: hanya dapat assign dirinya sendiri ke puskesmas manapun yang aktif
 
     Args:
         puskesmas_id: ID puskesmas tujuan
         ibu_id: ID ibu hamil yang akan di-assign
-        current_user: User yang sedang login (admin atau admin puskesmas)
+        current_user: User yang sedang login
         db: Database session
 
     Returns:
         IbuHamil: Data ibu hamil yang sudah di-update dengan puskesmas_id baru
     """
-    # Authorization check: hanya super admin atau admin puskesmas
-    # Super admin TIDAK dapat assign (hanya bisa approve/reject registrasi puskesmas)
-    if current_user.role not in {"super_admin", "puskesmas"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized. Super admin hanya dapat approve/reject registrasi puskesmas.",
-        )
+    # Authorization check: hanya admin puskesmas atau ibu_hamil
+    if current_user.role not in {"puskesmas", "ibu_hamil"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized",
-        )
-
-    # Get puskesmas
-    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
-    if not puskesmas or puskesmas.registration_status != "approved" or not puskesmas.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Puskesmas tidak ditemukan atau belum aktif",
-        )
-
-    # Validasi: Admin puskesmas hanya dapat assign untuk puskesmas yang dikelolanya sendiri
-    # Setiap puskesmas memiliki satu admin puskesmas (admin_user_id)
-    if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to assign for this puskesmas",
         )
 
     # Get ibu hamil
@@ -589,6 +575,29 @@ async def assign_ibu_hamil_to_puskesmas(
             detail="Ibu Hamil not found",
         )
 
+    # Validasi khusus untuk role ibu_hamil: hanya bisa assign diri sendiri
+    if current_user.role == "ibu_hamil":
+        if ibu.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anda hanya dapat assign diri sendiri ke puskesmas",
+            )
+
+    # Get puskesmas
+    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
+    if not puskesmas or puskesmas.registration_status != "approved" or not puskesmas.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan atau belum aktif",
+        )
+
+    # Validasi khusus untuk admin puskesmas: hanya dapat assign untuk puskesmasnya sendiri
+    if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to assign for this puskesmas",
+        )
+
     # Assign to puskesmas
     assigned = crud_ibu_hamil.assign_to_puskesmas(
         db,
@@ -597,16 +606,17 @@ async def assign_ibu_hamil_to_puskesmas(
         distance_km=0.0,
     )
 
-    # Create notification for ibu user
-    notification_in = NotificationCreate(
-        user_id=ibu.user_id,
-        title="Penugasan Puskesmas",
-        message=f"Anda ditugaskan ke {puskesmas.name}.",
-        notification_type="assignment",
-        priority="normal",
-        sent_via="in_app",
-    )
-    crud_notification.create(db, obj_in=notification_in)
+    # Create notification for ibu user (jika di-assign oleh admin puskesmas)
+    if current_user.role == "puskesmas":
+        notification_in = NotificationCreate(
+            user_id=ibu.user_id,
+            title="Penugasan Puskesmas",
+            message=f"Anda ditugaskan ke {puskesmas.name}.",
+            notification_type="assignment",
+            priority="normal",
+            sent_via="in_app",
+        )
+        crud_notification.create(db, obj_in=notification_in)
 
     return assigned
 
