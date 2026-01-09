@@ -276,21 +276,30 @@ def _auto_assign_nearest(
     response_model=dict,
     status_code=status.HTTP_201_CREATED,
     summary="Registrasi ibu hamil",
-    description="Publik atau user terautentikasi dapat mendaftarkan ibu hamil. Membuat user (role ibu_hamil) bila belum ada, lalu membuat profil ibu hamil dan auto-assign Puskesmas terdekat jika lokasi tersedia.",
+    description="""
+Registrasi ibu hamil baru.
+
+**Flow Registrasi:**
+1. Membuat akun user (role: ibu_hamil) jika belum ada
+2. Membuat profil ibu hamil dengan data lengkap
+3. Generate access token untuk login otomatis
+
+**Langkah Selanjutnya (di frontend):**
+1. Setelah registrasi berhasil, panggil endpoint `/puskesmas/nearest` untuk mendapatkan list 5 puskesmas terdekat
+2. Ibu hamil memilih puskesmas dari list tersebut
+3. Panggil endpoint `/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign` untuk assign ke puskesmas yang dipilih
+""",
     responses={
         201: {
             "description": "Registrasi berhasil, user dan profil ibu hamil telah dibuat",
             "content": {
                 "application/json": {
                     "example": {
-                        "ibu_hamil": {"id": 1, "nama_lengkap": "Siti Aminah", "nik": "3175091201850001"},
+                        "ibu_hamil": {"id": 1, "nama_lengkap": "Siti Aminah", "nik": "3175091201850001", "puskesmas_id": None},
                         "user": {"id": 1, "phone": "+6281234567890", "full_name": "Siti Aminah"},
                         "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
                         "token_type": "bearer",
-                        "assignment": {
-                            "puskesmas": {"id": 1, "name": "Puskesmas Sungai Penuh"},
-                            "distance_km": 1.2
-                        }
+                        "message": "Registrasi berhasil. Silakan pilih puskesmas terdekat untuk melanjutkan."
                     }
                 }
             }
@@ -368,11 +377,14 @@ async def register_ibu_hamil(
     4. Cek apakah NIK sudah terdaftar
     5. Buat user account (jika belum ada)
     6. Buat profil ibu hamil
-    7. Auto-assign ke Puskesmas terdekat (jika lokasi tersedia)
-    8. Generate access token
+    7. Generate access token
+    
+    Setelah registrasi, ibu hamil perlu:
+    - Memanggil GET /puskesmas/nearest untuk mendapatkan list puskesmas terdekat
+    - Memilih puskesmas dan memanggil POST /puskesmas/{id}/ibu-hamil/{ibu_id}/assign
     
     Returns:
-        dict: User info, ibu hamil profile, access token, dan assignment info
+        dict: User info, ibu hamil profile, access token, dan message
     
     Raises:
         HTTPException 400: NIK/phone/email sudah terdaftar atau data tidak valid
@@ -464,24 +476,10 @@ async def register_ibu_hamil(
                 detail=f"Gagal membuat profil ibu hamil: {str(e)}"
             )
 
-        # Auto-assign to nearest Puskesmas if location is provided
-        assigned_info = None
-        if payload.ibu_hamil.location:
-            try:
-                assigned_info = _auto_assign_nearest(db, ibu_obj)
-            except HTTPException as e:
-                # Log the assignment failure but continue (keep unassigned)
-                # User can be assigned manually later
-                assigned_info = None
-            except Exception as e:
-                # Log unexpected error but don't fail the registration
-                assigned_info = None
-
         # Generate access token
         try:
             token = create_access_token({"sub": str(user_obj.phone)})
         except Exception as e:
-            # Log the actual error for debugging
             import logging
             logging.error(f"Failed to create access token: {str(e)}")
             raise HTTPException(
@@ -491,24 +489,13 @@ async def register_ibu_hamil(
 
         # Build response
         try:
-            response = {
+            return {
                 "ibu_hamil": IbuHamilResponse.from_orm(ibu_obj),
                 "user": UserResponse.from_orm(user_obj),
                 "access_token": token,
                 "token_type": "bearer",
+                "message": "Registrasi berhasil. Silakan pilih puskesmas terdekat untuk melanjutkan.",
             }
-            if assigned_info:
-                _, puskesmas, distance = assigned_info
-                response["assignment"] = {
-                    "puskesmas": PuskesmasResponse.from_orm(puskesmas),
-                    "distance_km": distance,
-                }
-            else:
-                response["assignment"] = None
-                response["message"] = "Registrasi berhasil. Penugasan Puskesmas akan dilakukan secara manual oleh admin."
-            
-            return response
-            
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -748,13 +735,6 @@ async def update_ibu_hamil(
     _authorize_update(ibu, current_user, db)
 
     updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_update)
-
-    # If location changed and no explicit puskesmas_id provided, try auto-assign
-    if ibu_update.location and not ibu_update.puskesmas_id:
-        try:
-            _auto_assign_nearest(db, updated)
-        except HTTPException:
-            pass
 
     return updated
 
