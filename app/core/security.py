@@ -42,7 +42,14 @@ def create_access_token(
     
     Returns:
         Encoded JWT token
+    
+    Raises:
+        ValueError: If SECRET_KEY is not configured
     """
+    # Validate SECRET_KEY is set
+    if not settings.SECRET_KEY:
+        raise ValueError("SECRET_KEY environment variable is not set")
+    
     to_encode = data.copy()
     
     if expires_delta:

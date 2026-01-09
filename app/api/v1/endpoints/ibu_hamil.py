@@ -479,11 +479,14 @@ async def register_ibu_hamil(
 
         # Generate access token
         try:
-            token = create_access_token({"sub": user_obj.phone})
+            token = create_access_token({"sub": str(user_obj.phone)})
         except Exception as e:
+            # Log the actual error for debugging
+            import logging
+            logging.error(f"Failed to create access token: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Gagal membuat access token. Silakan login manual."
+                detail=f"Gagal membuat access token: {str(e)}"
             )
 
         # Build response
