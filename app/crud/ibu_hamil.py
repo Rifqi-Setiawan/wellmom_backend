@@ -154,6 +154,57 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         results = db.execute(stmt).all()
         return [(row[0], row[1]) for row in results]
 
+    def update(
+        self, db: Session, *, db_obj: IbuHamil, obj_in: IbuHamilUpdate
+    ) -> IbuHamil:
+        """Update IbuHamil with proper handling of nested riwayat_kesehatan_ibu and location.
+        
+        Args:
+            db: Database session
+            db_obj: Existing IbuHamil instance
+            obj_in: IbuHamilUpdate schema with optional fields
+            
+        Returns:
+            Updated IbuHamil instance
+        """
+        # Convert Pydantic model to dict (exclude location and riwayat_kesehatan_ibu)
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"location", "riwayat_kesehatan_ibu"})
+        
+        # Handle nested riwayat_kesehatan_ibu -> flatten to individual boolean columns
+        if obj_in.riwayat_kesehatan_ibu is not None:
+            riwayat = obj_in.riwayat_kesehatan_ibu.model_dump()
+            update_data.update(
+                {
+                    "darah_tinggi": riwayat.get("darah_tinggi"),
+                    "diabetes": riwayat.get("diabetes"),
+                    "anemia": riwayat.get("anemia"),
+                    "penyakit_jantung": riwayat.get("penyakit_jantung"),
+                    "asma": riwayat.get("asma"),
+                    "penyakit_ginjal": riwayat.get("penyakit_ginjal"),
+                    "tbc_malaria": riwayat.get("tbc_malaria"),
+                }
+            )
+        
+        # Handle location tuple -> convert to PostGIS Geography
+        if obj_in.location is not None:
+            lon, lat = obj_in.location
+            location_wkt = f"POINT({lon} {lat})"
+            update_data["location"] = ST_GeogFromText(location_wkt)
+        
+        # Update object attributes
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        
+        db.add(db_obj)
+        try:
+            db.commit()
+            db.refresh(db_obj)
+        except Exception:
+            db.rollback()
+            raise
+        
+        return db_obj
+
 
 # Singleton instance
 crud_ibu_hamil = CRUDIbuHamil(IbuHamil)

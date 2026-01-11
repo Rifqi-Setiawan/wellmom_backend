@@ -508,3 +508,98 @@ class UserUpdateProfile(BaseModel):
             "password": "NewPassword123!"
         }
     })
+
+
+class IbuHamilUpdateIdentitas(BaseModel):
+    """Schema untuk update identitas pribadi & alamat ibu hamil
+    
+    Digunakan untuk halaman profile setting identitas pribadi.
+    Field yang dapat diupdate:
+    - nama_lengkap
+    - date_of_birth
+    - nik
+    - address, provinsi, kota_kabupaten, kelurahan, kecamatan, location
+    """
+    nama_lengkap: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    nik: Optional[str] = None
+    address: Optional[str] = None
+    provinsi: Optional[str] = None
+    kota_kabupaten: Optional[str] = None
+    kelurahan: Optional[str] = None
+    kecamatan: Optional[str] = None
+    location: Optional[Tuple[float, float]] = None
+    
+    @field_validator("nik")
+    @classmethod
+    def validate_nik(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_nik(v) if v is not None else v
+    
+    @field_validator("location")
+    @classmethod
+    def validate_location(cls, v: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+        if v is None:
+            return v
+        return _validate_location(v)
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "nama_lengkap": "Siti Aminah Updated",
+            "date_of_birth": "1985-12-12",
+            "nik": "3175091201850001",
+            "address": "Jl. Mawar No. 10, RT 02 RW 05",
+            "provinsi": "Jambi",
+            "kota_kabupaten": "Kerinci",
+            "kelurahan": "Sungai Penuh",
+            "kecamatan": "Pesisir Bukit",
+            "location": [101.3912, -2.0645]
+        }
+    })
+
+
+class IbuHamilUpdateKehamilan(BaseModel):
+    """Schema untuk update data kehamilan & riwayat kesehatan ibu hamil
+    
+    Digunakan untuk halaman profile setting data kehamilan.
+    Field yang dapat diupdate:
+    - Data kehamilan (usia_kehamilan, kehamilan_ke, jumlah_anak, dll)
+    - Riwayat kesehatan (riwayat_kesehatan_ibu)
+    """
+    # Data Kehamilan
+    usia_kehamilan: Optional[int] = None
+    kehamilan_ke: Optional[int] = None
+    jumlah_anak: Optional[int] = None
+    miscarriage_number: Optional[int] = None
+    jarak_kehamilan_terakhir: Optional[str] = None
+    last_menstrual_period: Optional[date] = None  # HPHT
+    estimated_due_date: Optional[date] = None  # HPL
+    previous_pregnancy_complications: Optional[str] = None
+    pernah_caesar: Optional[bool] = None
+    pernah_perdarahan_saat_hamil: Optional[bool] = None
+    
+    # Riwayat Kesehatan
+    riwayat_kesehatan_ibu: Optional[RiwayatKesehatanIbu] = None
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "usia_kehamilan": 9,
+            "kehamilan_ke": 2,
+            "jumlah_anak": 1,
+            "miscarriage_number": 0,
+            "jarak_kehamilan_terakhir": "2 tahun",
+            "last_menstrual_period": "2024-12-01",
+            "estimated_due_date": "2025-09-08",
+            "previous_pregnancy_complications": "Tidak ada",
+            "pernah_caesar": False,
+            "pernah_perdarahan_saat_hamil": False,
+            "riwayat_kesehatan_ibu": {
+                "darah_tinggi": False,
+                "diabetes": False,
+                "anemia": False,
+                "penyakit_jantung": False,
+                "asma": False,
+                "penyakit_ginjal": False,
+                "tbc_malaria": False
+            }
+        }
+    })

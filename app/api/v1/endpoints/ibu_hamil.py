@@ -32,6 +32,8 @@ from app.schemas.ibu_hamil import (
     IbuHamilLoginResponse,
     IbuHamilResponse,
     IbuHamilUpdate,
+    IbuHamilUpdateIdentitas,
+    IbuHamilUpdateKehamilan,
     IbuHamilProfileResponse,
     UserUpdateProfile,
 )
@@ -803,24 +805,38 @@ async def get_my_profile_full(
 
 
 @router.patch(
-    "/me/profile",
+    "/me/profile/identitas",
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update profil ibu hamil (untuk profile setting)",
+    summary="Update identitas pribadi & alamat ibu hamil",
     description="""
-Update profil ibu hamil yang sedang login.
+Update identitas pribadi dan alamat ibu hamil yang sedang login.
 
 **Akses:**
 - Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
 - Hanya dapat mengupdate profil dirinya sendiri
 
 **Field yang dapat diupdate:**
-- Semua field pada IbuHamilUpdate (nama_lengkap, nik, date_of_birth, address, location, dll)
-- Field yang tidak boleh diupdate melalui endpoint ini: puskesmas_id, perawat_id, assigned_by_user_id
+- **Identitas Pribadi:**
+  - nama_lengkap: Nama lengkap
+  - date_of_birth: Tanggal lahir
+  - nik: NIK (harus unik, tidak boleh duplikat)
+
+- **Alamat & Lokasi:**
+  - address: Alamat lengkap
+  - provinsi: Provinsi
+  - kota_kabupaten: Kota/Kabupaten
+  - kelurahan: Kelurahan
+  - kecamatan: Kecamatan
+  - location: Koordinat lokasi [longitude, latitude]
+
+**Catatan:**
+- Endpoint ini khusus untuk halaman profile setting identitas pribadi
+- Untuk update data kehamilan, gunakan endpoint `/me/profile/kehamilan`
 """,
     responses={
         200: {
-            "description": "Profil berhasil diupdate",
+            "description": "Identitas pribadi & alamat berhasil diupdate",
             "content": {
                 "application/json": {
                     "example": {
@@ -828,6 +844,11 @@ Update profil ibu hamil yang sedang login.
                         "user_id": 15,
                         "nama_lengkap": "Siti Aminah Updated",
                         "nik": "3175091201850001",
+                        "date_of_birth": "1985-12-12",
+                        "address": "Jl. Mawar No. 10, RT 02 RW 05",
+                        "provinsi": "Jambi",
+                        "kota_kabupaten": "Kerinci",
+                        "location": [101.3912, -2.0645],
                         "is_active": True
                     }
                 }
@@ -837,7 +858,16 @@ Update profil ibu hamil yang sedang login.
             "description": "Data tidak valid",
             "content": {
                 "application/json": {
-                    "example": {"detail": "NIK sudah terdaftar di sistem"}
+                    "examples": {
+                        "nik_exists": {
+                            "summary": "NIK sudah terdaftar",
+                            "value": {"detail": "NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali."}
+                        },
+                        "invalid_location": {
+                            "summary": "Koordinat lokasi tidak valid",
+                            "value": {"detail": "Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90."}
+                        }
+                    }
                 }
             }
         },
@@ -859,16 +889,16 @@ Update profil ibu hamil yang sedang login.
         }
     }
 )
-async def update_my_profile(
-    ibu_update: IbuHamilUpdate,
+async def update_my_profile_identitas(
+    identitas_update: IbuHamilUpdateIdentitas,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> IbuHamil:
     """
-    Update profil ibu hamil yang sedang login.
+    Update identitas pribadi & alamat ibu hamil yang sedang login.
     
     Args:
-        ibu_update: Data update untuk profil ibu hamil
+        identitas_update: Data update untuk identitas pribadi & alamat
         current_user: User yang sedang login (harus role ibu_hamil)
         db: Database session
         
@@ -896,8 +926,8 @@ async def update_my_profile(
         )
     
     # Validasi: jika NIK diupdate, pastikan tidak duplikat
-    if ibu_update.nik and ibu_update.nik != ibu.nik:
-        existing_ibu = db.query(IbuHamil).filter(IbuHamil.nik == ibu_update.nik).first()
+    if identitas_update.nik and identitas_update.nik != ibu.nik:
+        existing_ibu = db.query(IbuHamil).filter(IbuHamil.nik == identitas_update.nik).first()
         if existing_ibu:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -905,16 +935,131 @@ async def update_my_profile(
             )
     
     # Validasi location jika diupdate
-    if ibu_update.location:
-        lon, lat = ibu_update.location
+    if identitas_update.location:
+        lon, lat = identitas_update.location
         if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90.",
             )
     
-    # Update profil
-    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_update)
+    # Update profil identitas
+    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=identitas_update)
+    
+    return updated
+
+
+@router.patch(
+    "/me/profile/kehamilan",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update data kehamilan & riwayat kesehatan ibu hamil",
+    description="""
+Update data kehamilan dan riwayat kesehatan ibu hamil yang sedang login.
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Hanya dapat mengupdate profil dirinya sendiri
+
+**Field yang dapat diupdate:**
+- **Data Kehamilan:**
+  - usia_kehamilan: Usia kehamilan (minggu)
+  - kehamilan_ke: Kehamilan ke berapa
+  - jumlah_anak: Jumlah anak hidup
+  - miscarriage_number: Riwayat keguguran
+  - jarak_kehamilan_terakhir: Jarak kehamilan terakhir
+  - last_menstrual_period: HPHT (Hari Pertama Haid Terakhir)
+  - estimated_due_date: HPL (Hari Perkiraan Lahir)
+  - previous_pregnancy_complications: Komplikasi kehamilan sebelumnya
+  - pernah_caesar: Pernah persalinan caesar
+  - pernah_perdarahan_saat_hamil: Pernah pendarahan saat hamil
+
+- **Riwayat Kesehatan:**
+  - riwayat_kesehatan_ibu: Object berisi:
+    - darah_tinggi: Pernah darah tinggi?
+    - diabetes: Pernah diabetes?
+    - anemia: Pernah anemia?
+    - penyakit_jantung: Pernah penyakit jantung?
+    - asma: Pernah asma?
+    - penyakit_ginjal: Pernah penyakit ginjal?
+    - tbc_malaria: Pernah TBC/Malaria?
+
+**Catatan:**
+- Endpoint ini khusus untuk halaman profile setting data kehamilan
+- Untuk update identitas pribadi & alamat, gunakan endpoint `/me/profile/identitas`
+""",
+    responses={
+        200: {
+            "description": "Data kehamilan & riwayat kesehatan berhasil diupdate",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 18,
+                        "user_id": 15,
+                        "nama_lengkap": "Siti Aminah",
+                        "usia_kehamilan": 9,
+                        "kehamilan_ke": 2,
+                        "jumlah_anak": 1,
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def update_my_profile_kehamilan(
+    kehamilan_update: IbuHamilUpdateKehamilan,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    """
+    Update data kehamilan & riwayat kesehatan ibu hamil yang sedang login.
+    
+    Args:
+        kehamilan_update: Data update untuk kehamilan & riwayat kesehatan
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Returns:
+        IbuHamil: Data ibu hamil yang sudah diupdate
+        
+    Raises:
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+    
+    # Update profil kehamilan
+    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=kehamilan_update)
     
     return updated
 
