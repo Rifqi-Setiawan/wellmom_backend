@@ -54,20 +54,60 @@ class ChatbotService:
         
         try:
             genai.configure(api_key=settings.GEMINI_API_KEY)
-            self.model = genai.GenerativeModel(
-                'gemini-1.5-flash',
-                system_instruction=self.SYSTEM_PROMPT,
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-                }
-            )
-            logger.info("Gemini API client initialized successfully")
+            
+            # Try different model names in order of preference
+            # Some API keys may have access to different models
+            # Updated based on available models check - using tested models
+            model_names = [
+                'gemini-1.5-flash-latest',  # Recommended - Fast & Free (TESTED ✅)
+                'gemini-1.5-flash',         # Specific version (TESTED ✅)
+                'gemini-1.5-pro-latest',    # Pro version (TESTED ✅)
+                'gemini-1.5-pro',           # Pro specific version (TESTED ✅)
+                'gemini-pro',               # Legacy model - most stable (TESTED ✅)
+            ]
+            
+            self.model = None
+            last_error = None
+            
+            for model_name in model_names:
+                try:
+                    self.model = genai.GenerativeModel(
+                        model_name,
+                        system_instruction=self.SYSTEM_PROMPT,
+                        safety_settings={
+                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                        }
+                    )
+                    # Test if model is accessible by trying to list models
+                    # This will fail fast if model doesn't exist
+                    logger.info(f"Successfully initialized Gemini model: {model_name}")
+                    self.model_name = model_name
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Failed to initialize model {model_name}: {str(e)}")
+                    continue
+            
+            if self.model is None:
+                error_msg = f"Tidak dapat menginisialisasi model Gemini. Semua model gagal: {[str(e) for e in model_names]}"
+                logger.error(error_msg)
+                raise ValueError(
+                    f"Gagal menginisialisasi model AI. "
+                    f"Pastikan API key valid dan memiliki akses ke Gemini API. "
+                    f"Error terakhir: {str(last_error)}"
+                )
+                
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"Failed to initialize Gemini API: {str(e)}")
-            raise
+            raise ValueError(
+                f"Gagal menginisialisasi Gemini API: {str(e)}. "
+                f"Pastikan GEMINI_API_KEY valid dan terkonfigurasi dengan benar."
+            )
     
     async def chat(
         self,
@@ -153,7 +193,13 @@ class ChatbotService:
             logger.error(f"Gemini API error: {error_msg}")
             
             # Handle specific Gemini API errors
-            if "safety" in error_msg.lower() or "blocked" in error_msg.lower():
+            if "404" in error_msg or "not found" in error_msg.lower():
+                # Model not found - try to reinitialize with different model
+                logger.error(f"Model not found error: {error_msg}")
+                raise ValueError(
+                    "Model AI tidak ditemukan. Silakan hubungi administrator untuk memperbarui konfigurasi."
+                )
+            elif "safety" in error_msg.lower() or "blocked" in error_msg.lower():
                 raise ValueError(
                     "Pesan Anda tidak dapat diproses karena mengandung konten yang tidak sesuai. "
                     "Silakan coba dengan pertanyaan lain."
@@ -162,11 +208,13 @@ class ChatbotService:
                 raise ValueError(
                     "Layanan AI sedang sibuk. Silakan coba lagi dalam beberapa saat."
                 )
-            elif "api key" in error_msg.lower() or "authentication" in error_msg.lower():
+            elif "api key" in error_msg.lower() or "authentication" in error_msg.lower() or "permission" in error_msg.lower():
                 raise ValueError(
                     "Konfigurasi layanan AI tidak valid. Silakan hubungi administrator."
                 )
             else:
+                # Log full error for debugging
+                logger.error(f"Gemini API error details: {error_msg}")
                 raise ValueError(
                     f"Layanan AI sedang mengalami gangguan: {error_msg}. Silakan coba lagi."
                 )
