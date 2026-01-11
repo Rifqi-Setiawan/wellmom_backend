@@ -66,3 +66,7 @@ desktop.ini
 # Backup files
 *.bak
 *~
+
+# Documentation files (not needed in production)
+*.md
+!README.md

@@ -25,7 +25,7 @@ from app.schemas.chatbot import (
     QuotaInfoResponse,
     ChatbotNewConversationRequest,
 )
-from app.services.chatbot_service import chatbot_service
+from app.services.chatbot_service import chatbot_service, get_chatbot_service
 
 router = APIRouter(
     prefix="/chatbot",
@@ -744,6 +744,84 @@ async def create_new_conversation(
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
     )
+
+
+@router.get(
+    "/status",
+    status_code=status.HTTP_200_OK,
+    summary="Cek status layanan chatbot",
+    description="""
+Cek status dan ketersediaan layanan chatbot AI.
+
+**Akses:**
+- Dapat diakses oleh semua user yang terautentikasi (ibu_hamil, kerabat, perawat, admin)
+
+**Response:**
+- `is_available`: Apakah layanan chatbot tersedia
+- `model_name`: Nama model AI yang digunakan
+- `api_key_configured`: Apakah API key sudah dikonfigurasi
+- `error`: Pesan error jika ada
+
+**Catatan:**
+- Endpoint ini berguna untuk troubleshooting dan monitoring
+- Jika `is_available` = false, berarti ada masalah dengan konfigurasi atau API key
+""",
+    responses={
+        200: {
+            "description": "Status layanan chatbot",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "available": {
+                            "summary": "Layanan tersedia",
+                            "value": {
+                                "is_available": True,
+                                "model_name": "gemini-1.5-flash-latest",
+                                "api_key_configured": True,
+                                "error": None
+                            }
+                        },
+                        "unavailable": {
+                            "summary": "Layanan tidak tersedia",
+                            "value": {
+                                "is_available": False,
+                                "model_name": None,
+                                "api_key_configured": True,
+                                "error": "Model tidak terinisialisasi"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+async def get_chatbot_status(
+    current_user: User = Depends(get_current_active_user),
+) -> dict:
+    """
+    Cek status layanan chatbot.
+    
+    Args:
+        current_user: Current authenticated user
+        
+    Returns:
+        dict: Status information
+    """
+    try:
+        service = get_chatbot_service()
+        status_info = service.get_status()
+        return status_info
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error checking chatbot status: {str(e)}")
+        return {
+            "is_available": False,
+            "model_name": None,
+            "api_key_configured": bool(settings.GEMINI_API_KEY),
+            "error": f"Gagal memeriksa status: {str(e)}"
+        }
 
 
 __all__ = ["router"]

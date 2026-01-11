@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -314,7 +314,50 @@ class ChatbotService:
                 })
         
         return self.format_history_for_gemini(history)
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get service status information.
+        
+        Returns:
+            dict: Status information including model_name, is_available, etc.
+        """
+        status = {
+            "is_available": self.model is not None,
+            "model_name": getattr(self, "model_name", None),
+            "api_key_configured": bool(settings.GEMINI_API_KEY),
+        }
+        
+        if self.model is None:
+            status["error"] = "Model tidak terinisialisasi"
+        else:
+            status["error"] = None
+        
+        return status
 
 
-# Singleton instance
-chatbot_service = ChatbotService()
+# Singleton instance - lazy initialization
+_chatbot_service_instance: Optional[ChatbotService] = None
+
+
+def get_chatbot_service() -> ChatbotService:
+    """Get or create chatbot service instance (lazy initialization)."""
+    global _chatbot_service_instance
+    if _chatbot_service_instance is None:
+        try:
+            _chatbot_service_instance = ChatbotService()
+        except Exception as e:
+            logger.error(f"Failed to initialize ChatbotService: {str(e)}")
+            raise
+    return _chatbot_service_instance
+
+
+# For backward compatibility - property that uses lazy initialization
+class _ChatbotServiceProxy:
+    """Proxy class for backward compatibility."""
+    
+    def __getattr__(self, name):
+        service = get_chatbot_service()
+        return getattr(service, name)
+
+chatbot_service = _ChatbotServiceProxy()
