@@ -2046,7 +2046,324 @@ Authorization: Bearer <token>
 
 ---
 
-### 3. Get Ibu Hamil Detail
+### 3. Get My Profile Full (Profile Setting)
+
+**Deskripsi Endpoint:**
+- Get profil lengkap ibu hamil yang sedang login (gabungan data user + ibu hamil)
+- Digunakan untuk halaman profile setting yang menampilkan semua data user dan ibu hamil
+- Hanya dapat diakses oleh ibu hamil yang sedang login
+
+**Request Details:**
+
+- **HTTP Method:** GET
+- **URL Path:** `/api/v1/ibu-hamil/me/profile`
+- **Authentication:** **Required** (Bearer Token)
+- **Status Codes:** 200 (OK), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
+
+**Example Request:**
+
+```
+GET /api/v1/ibu-hamil/me/profile
+Authorization: Bearer <token>
+```
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "user": {
+    "id": 15,
+    "email": "siti.aminah@example.com",
+    "phone": "+6281234567890",
+    "full_name": "Siti Aminah",
+    "role": "ibu_hamil",
+    "profile_photo_url": null,
+    "is_active": true,
+    "is_verified": false,
+    "verification_token": null,
+    "created_at": "2026-01-09T21:18:41.584534",
+    "updated_at": "2026-01-09T21:18:41.584534"
+  },
+  "ibu_hamil": {
+    "id": 18,
+    "user_id": 15,
+    "puskesmas_id": 1,
+    "perawat_id": null,
+    "assigned_by_user_id": null,
+    "nama_lengkap": "Siti Aminah",
+    "nik": "3175091201850001",
+    "date_of_birth": "1985-12-12",
+    "age": 39,
+    "blood_type": "O+",
+    "profile_photo_url": null,
+    "last_menstrual_period": "2024-12-01",
+    "estimated_due_date": "2025-09-08",
+    "usia_kehamilan": 8,
+    "kehamilan_ke": 2,
+    "jumlah_anak": 1,
+    "miscarriage_number": 0,
+    "jarak_kehamilan_terakhir": "2 tahun",
+    "previous_pregnancy_complications": "Tidak ada",
+    "pernah_caesar": false,
+    "pernah_perdarahan_saat_hamil": false,
+    "address": "Jl. Mawar No. 10, RT 02 RW 05, Kelurahan Sungai Penuh",
+    "provinsi": "Jambi",
+    "kota_kabupaten": "Kerinci",
+    "kelurahan": "Sungai Penuh",
+    "kecamatan": "Pesisir Bukit",
+    "location": [101.3912, -2.0645],
+    "emergency_contact_name": "Budi (Suami)",
+    "emergency_contact_phone": "+6281298765432",
+    "emergency_contact_relation": "Suami",
+    "darah_tinggi": false,
+    "diabetes": false,
+    "anemia": false,
+    "penyakit_jantung": false,
+    "asma": false,
+    "penyakit_ginjal": false,
+    "tbc_malaria": false,
+    "risk_level": "normal",
+    "assignment_date": null,
+    "assignment_distance_km": null,
+    "assignment_method": null,
+    "healthcare_preference": "puskesmas",
+    "whatsapp_consent": true,
+    "data_sharing_consent": false,
+    "is_active": true,
+    "created_at": "2026-01-09T21:18:41.640648",
+    "updated_at": "2026-01-09T21:18:41.640648"
+  }
+}
+```
+
+**Error Response Examples:**
+
+Status 403 - Not Ibu Hamil:
+```json
+{
+  "detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"
+}
+```
+
+Status 404 - Profile Not Found:
+```json
+{
+  "detail": "Profil Ibu Hamil tidak ditemukan"
+}
+```
+
+---
+
+### 4. Update My Profile (Profile Setting)
+
+**Deskripsi Endpoint:**
+- Update profil ibu hamil yang sedang login
+- Hanya dapat diakses oleh ibu hamil yang sedang login
+- Hanya dapat mengupdate profil dirinya sendiri
+- Semua field optional (partial update)
+
+**Request Details:**
+
+- **HTTP Method:** PATCH
+- **URL Path:** `/api/v1/ibu-hamil/me/profile`
+- **Authentication:** **Required** (Bearer Token)
+- **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden), 404 (Not Found)
+
+**Headers:**
+
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body (All fields optional):**
+
+```json
+{
+  "nama_lengkap": "Siti Aminah Updated",
+  "nik": "3175091201850001",
+  "date_of_birth": "1985-12-12",
+  "age": 39,
+  "blood_type": "O+",
+  "address": "Jl. Baru No. 20",
+  "provinsi": "Jambi",
+  "kota_kabupaten": "Kerinci",
+  "kelurahan": "Sungai Penuh",
+  "kecamatan": "Pesisir Bukit",
+  "location": [101.4, -2.1],
+  "last_menstrual_period": "2024-12-01",
+  "estimated_due_date": "2025-09-08",
+  "usia_kehamilan": 10,
+  "kehamilan_ke": 2,
+  "jumlah_anak": 1,
+  "jarak_kehamilan_terakhir": "2 tahun",
+  "miscarriage_number": 0,
+  "previous_pregnancy_complications": "Tidak ada",
+  "pernah_caesar": false,
+  "pernah_perdarahan_saat_hamil": false,
+  "riwayat_kesehatan_ibu": {
+    "darah_tinggi": false,
+    "diabetes": false,
+    "anemia": true,
+    "penyakit_jantung": false,
+    "asma": false,
+    "penyakit_ginjal": false,
+    "tbc_malaria": false
+  },
+  "emergency_contact_name": "Budi (Suami)",
+  "emergency_contact_phone": "+6281298765432",
+  "emergency_contact_relation": "Suami",
+  "risk_level": "normal",
+  "healthcare_preference": "puskesmas",
+  "whatsapp_consent": true,
+  "data_sharing_consent": false
+}
+```
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "id": 18,
+  "user_id": 15,
+  "puskesmas_id": 1,
+  "perawat_id": null,
+  "nama_lengkap": "Siti Aminah Updated",
+  "nik": "3175091201850001",
+  "date_of_birth": "1985-12-12",
+  "age": 39,
+  "blood_type": "O+",
+  "location": [101.4, -2.1],
+  "address": "Jl. Baru No. 20",
+  "is_active": true,
+  "updated_at": "2026-01-09T22:00:00.000000"
+}
+```
+
+**Error Response Examples:**
+
+Status 400 - NIK Already Exists:
+```json
+{
+  "detail": "NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali."
+}
+```
+
+Status 400 - Invalid Location:
+```json
+{
+  "detail": "Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90."
+}
+```
+
+Status 403 - Not Ibu Hamil:
+```json
+{
+  "detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"
+}
+```
+
+---
+
+### 5. Update My User Data (Profile Setting)
+
+**Deskripsi Endpoint:**
+- Update data user yang sedang login (email, phone, full_name, password)
+- Hanya dapat diakses oleh ibu hamil yang sedang login
+- Hanya dapat mengupdate data dirinya sendiri
+- Semua field optional (partial update)
+
+**Request Details:**
+
+- **HTTP Method:** PATCH
+- **URL Path:** `/api/v1/ibu-hamil/me/user`
+- **Authentication:** **Required** (Bearer Token)
+- **Status Codes:** 200 (OK), 400 (Bad Request), 401 (Unauthorized), 403 (Forbidden)
+
+**Headers:**
+
+```
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+**Request Body (All fields optional):**
+
+```json
+{
+  "email": "siti.new@example.com",
+  "phone": "+628111222333",
+  "full_name": "Siti Aminah Updated",
+  "password": "NewPassword123!"
+}
+```
+
+**Request Body Schema:**
+
+| Field | Type | Required | Validation |
+|-------|------|----------|------------|
+| email | string | No | Valid email format, must be unique if provided |
+| phone | string | No | 8-15 digits, optional leading '+', must be unique if provided |
+| full_name | string | No | - |
+| password | string | No | Minimum 6 characters |
+
+**Response Details:**
+
+**Success Response (Status 200):**
+
+```json
+{
+  "id": 15,
+  "email": "siti.new@example.com",
+  "phone": "+628111222333",
+  "full_name": "Siti Aminah Updated",
+  "role": "ibu_hamil",
+  "profile_photo_url": null,
+  "is_active": true,
+  "is_verified": false,
+  "verification_token": null,
+  "created_at": "2026-01-09T21:18:41.584534",
+  "updated_at": "2026-01-09T22:00:00.000000"
+}
+```
+
+**Error Response Examples:**
+
+Status 400 - Phone Already Exists:
+```json
+{
+  "detail": "Nomor telepon sudah terdaftar di sistem. Silakan gunakan nomor lain."
+}
+```
+
+Status 400 - Email Already Exists:
+```json
+{
+  "detail": "Email sudah terdaftar di sistem. Silakan gunakan email lain."
+}
+```
+
+Status 400 - Password Too Short:
+```json
+{
+  "detail": "Password minimal 6 karakter"
+}
+```
+
+Status 403 - Not Ibu Hamil:
+```json
+{
+  "detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"
+}
+```
+
+---
+
+### 6. Get Ibu Hamil Detail
 
 **Deskripsi Endpoint:**
 - Get detail ibu hamil berdasarkan ID
@@ -2709,6 +3026,9 @@ Semua error responses menggunakan format berikut:
 | /api/v1/puskesmas/nearest | GET | 200 |
 | /api/v1/ibu-hamil/register | POST | 201 |
 | /api/v1/ibu-hamil/me | GET | 200 |
+| /api/v1/ibu-hamil/me/profile | GET | 200 |
+| /api/v1/ibu-hamil/me/profile | PATCH | 200 |
+| /api/v1/ibu-hamil/me/user | PATCH | 200 |
 | /api/v1/ibu-hamil/{id} | GET | 200 |
 | /api/v1/ibu-hamil/{id} | PATCH | 200 |
 
@@ -2894,31 +3214,34 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 
 26. **Register Ibu Hamil with User** : Registrasi ibu hamil baru lengkap dengan user account dan auto-assign
 27. **Get My Profile (Current Ibu Hamil)** : Get profile ibu hamil yang sedang login atau kerabat yang linked
-28. **Get Ibu Hamil Detail** : Get detail ibu hamil berdasarkan ID dengan authorization check
-29. **Update Ibu Hamil Profile** : Update profile ibu hamil dengan auto-assign ulang jika location berubah
-30. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (super admin/puskesmas only)
-31. **Manual Assign to Puskesmas** : Manual assignment ibu hamil ke puskesmas dengan optional perawat selection
-32. **Auto-Assign to Nearest Puskesmas** : Auto-assignment ibu hamil ke puskesmas terdekat dengan cek kapasitas
-33. **List Ibu Hamil by Puskesmas** : Daftar ibu hamil per puskesmas dengan pagination support
-34. **List Ibu Hamil by Perawat** : Daftar ibu hamil per perawat/nurse dengan authorization check
+28. **Get My Profile Full (Profile Setting)** : Get profil lengkap ibu hamil yang sedang login (gabungan data user + ibu hamil) untuk halaman profile setting
+29. **Update My Profile (Profile Setting)** : Update profil ibu hamil yang sedang login untuk halaman profile setting
+30. **Update My User Data (Profile Setting)** : Update data user yang sedang login (email, phone, full_name, password) untuk halaman profile setting
+31. **Get Ibu Hamil Detail** : Get detail ibu hamil berdasarkan ID dengan authorization check
+32. **Update Ibu Hamil Profile** : Update profile ibu hamil dengan auto-assign ulang jika location berubah
+33. **List Unassigned Ibu Hamil** : List ibu hamil yang belum ter-assign ke puskesmas (super admin/puskesmas only)
+34. **Manual Assign to Puskesmas** : Manual assignment ibu hamil ke puskesmas dengan optional perawat selection
+35. **Auto-Assign to Nearest Puskesmas** : Auto-assignment ibu hamil ke puskesmas terdekat dengan cek kapasitas
+36. **List Ibu Hamil by Puskesmas** : Daftar ibu hamil per puskesmas dengan pagination support
+37. **List Ibu Hamil by Perawat** : Daftar ibu hamil per perawat/nurse dengan authorization check
 
 ---
 
 ### Statistik API
 
-- **Total Endpoints:** 35 API endpoints
+- **Total Endpoints:** 38 API endpoints
 - **Health Check:** 4 endpoints
 - **Authentication:** 3 endpoints
 - **User Management:** 5 endpoints
 - **Puskesmas Management:** 7 endpoints
-- **Ibu Hamil Management:** 9 endpoints
+- **Ibu Hamil Management:** 12 endpoints
 
 ### Authentication Requirements
 
 - **Public Endpoints:** 7 (Health checks, Register, Login, List Puskesmas, Get Puskesmas Detail, Find Nearest)
-- **Authenticated Endpoints:** 21 (Memerlukan JWT Bearer Token)
+- **Authenticated Endpoints:** 24 (Memerlukan JWT Bearer Token)
 - **Super Admin Only:** 5 (List Users, List Pending, Approve, Reject, Deactivate)
-- **Role-based Access:** 13 (Puskesmas admin, Perawat, Ibu Hamil, Kerabat)
+- **Role-based Access:** 16 (Puskesmas admin, Perawat, Ibu Hamil, Kerabat)
 
 ---
 
@@ -2926,5 +3249,5 @@ Berikut adalah rangkuman lengkap semua API endpoints yang tersedia di WellMom Ba
 
 Untuk pertanyaan atau issues, silakan hubungi tim development WellMom.
 
-**Last Updated:** December 15, 2024  
+**Last Updated:** January 9, 2026  
 **API Version:** 1.0.0

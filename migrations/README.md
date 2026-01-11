@@ -262,3 +262,53 @@ ALTER TABLE users ADD CONSTRAINT check_user_role
 **Error lainnya:**
 1. Pastikan Anda sudah connect ke database yang benar
 2. Pastikan user memiliki permission untuk ALTER TABLE dan UPDATE
+
+---
+
+## Add Kerabat Invitation Code Fields
+
+Migration ini menambahkan field untuk fitur invitation code kerabat:
+- `invite_code_created_at`: Waktu invitation code dibuat
+- `invite_code_expires_at`: Waktu expiration invitation code (24 jam)
+- `kerabat_user_id`: Diubah menjadi nullable (untuk support invitation code flow)
+- `relation_type`: Diubah menjadi nullable (akan diisi setelah kerabat complete profile)
+
+### Cara Menjalankan Migration di VPS
+
+#### Opsi 1: Via Docker (RECOMMENDED)
+
+```bash
+# Pastikan container PostgreSQL berjalan
+docker ps | grep wellmom_postgres
+
+# Jalankan migration
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db < migrations/add_kerabat_invitation_code_fields.sql
+```
+
+#### Opsi 2: Copy-paste SQL langsung
+
+1. **Connect ke database:**
+```bash
+docker exec -it wellmom_postgres psql -U wellmom -d wellmom_db
+```
+
+2. **Copy-paste isi file `migrations/add_kerabat_invitation_code_fields.sql`** ke console
+
+3. **Verifikasi:**
+```sql
+\d kerabat_ibu_hamil
+```
+
+### Verifikasi Migration
+
+Setelah migration berhasil, verifikasi dengan:
+
+```bash
+docker exec -i wellmom_postgres psql -U wellmom -d wellmom_db -c "\d kerabat_ibu_hamil"
+```
+
+Pastikan kolom berikut ada:
+- `invite_code_created_at` (TIMESTAMP)
+- `invite_code_expires_at` (TIMESTAMP)
+- `kerabat_user_id` (nullable)
+- `relation_type` (nullable)

@@ -32,6 +32,8 @@ from app.schemas.ibu_hamil import (
     IbuHamilLoginResponse,
     IbuHamilResponse,
     IbuHamilUpdate,
+    IbuHamilProfileResponse,
+    UserUpdateProfile,
 )
 from app.schemas.notification import NotificationCreate
 from app.schemas.puskesmas import PuskesmasResponse
@@ -699,6 +701,549 @@ async def get_my_profile(
         )
 
     return ibu
+
+
+@router.get(
+    "/me/profile",
+    response_model=IbuHamilProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Profil lengkap ibu hamil (untuk profile setting)",
+    description="""
+Mengambil profil lengkap ibu hamil yang sedang login, termasuk data user dan data ibu hamil.
+Digunakan untuk halaman profile setting.
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Data yang dikembalikan mencakup semua informasi user dan profil ibu hamil
+""",
+    responses={
+        200: {
+            "description": "Profil lengkap berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "user": {
+                            "id": 15,
+                            "email": "siti.aminah@example.com",
+                            "phone": "+6281234567890",
+                            "full_name": "Siti Aminah",
+                            "role": "ibu_hamil",
+                            "is_active": True,
+                            "is_verified": False
+                        },
+                        "ibu_hamil": {
+                            "id": 18,
+                            "user_id": 15,
+                            "nama_lengkap": "Siti Aminah",
+                            "nik": "3175091201850001",
+                            "date_of_birth": "1985-12-12",
+                            "location": [101.3912, -2.0645],
+                            "address": "Jl. Mawar No. 10",
+                            "is_active": True
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def get_my_profile_full(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamilProfileResponse:
+    """
+    Mengambil profil lengkap ibu hamil yang sedang login (user + ibu hamil).
+    
+    Args:
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Returns:
+        IbuHamilProfileResponse: Gabungan data user dan ibu hamil
+        
+    Raises:
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+    
+    return IbuHamilProfileResponse(
+        user=UserResponse.model_validate(current_user),
+        ibu_hamil=IbuHamilResponse.model_validate(ibu),
+    )
+
+
+@router.patch(
+    "/me/profile",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update profil ibu hamil (untuk profile setting)",
+    description="""
+Update profil ibu hamil yang sedang login.
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Hanya dapat mengupdate profil dirinya sendiri
+
+**Field yang dapat diupdate:**
+- Semua field pada IbuHamilUpdate (nama_lengkap, nik, date_of_birth, address, location, dll)
+- Field yang tidak boleh diupdate melalui endpoint ini: puskesmas_id, perawat_id, assigned_by_user_id
+""",
+    responses={
+        200: {
+            "description": "Profil berhasil diupdate",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 18,
+                        "user_id": 15,
+                        "nama_lengkap": "Siti Aminah Updated",
+                        "nik": "3175091201850001",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Data tidak valid",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "NIK sudah terdaftar di sistem"}
+                }
+            }
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def update_my_profile(
+    ibu_update: IbuHamilUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    """
+    Update profil ibu hamil yang sedang login.
+    
+    Args:
+        ibu_update: Data update untuk profil ibu hamil
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Returns:
+        IbuHamil: Data ibu hamil yang sudah diupdate
+        
+    Raises:
+        HTTPException 400: Data tidak valid (misalnya NIK sudah terdaftar)
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+    
+    # Validasi: jika NIK diupdate, pastikan tidak duplikat
+    if ibu_update.nik and ibu_update.nik != ibu.nik:
+        existing_ibu = db.query(IbuHamil).filter(IbuHamil.nik == ibu_update.nik).first()
+        if existing_ibu:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali.",
+            )
+    
+    # Validasi location jika diupdate
+    if ibu_update.location:
+        lon, lat = ibu_update.location
+        if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90.",
+            )
+    
+    # Update profil
+    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_update)
+    
+    return updated
+
+
+@router.patch(
+    "/me/user",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update data user (untuk profile setting)",
+    description="""
+Update data user yang sedang login (email, phone, full_name, password).
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Hanya dapat mengupdate data dirinya sendiri
+
+**Field yang dapat diupdate:**
+- email: Email baru (optional)
+- phone: Nomor telepon baru (optional, harus unik)
+- full_name: Nama lengkap baru (optional)
+- password: Password baru (optional, minimal 6 karakter)
+
+**Catatan:**
+- Jika phone diupdate, pastikan phone baru belum terdaftar
+- Jika email diupdate, pastikan email baru belum terdaftar
+- Password akan di-hash sebelum disimpan
+""",
+    responses={
+        200: {
+            "description": "Data user berhasil diupdate",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 15,
+                        "email": "siti.new@example.com",
+                        "phone": "+628111222333",
+                        "full_name": "Siti Aminah Updated",
+                        "role": "ibu_hamil",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Data tidak valid atau sudah terdaftar",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "phone_exists": {
+                            "summary": "Nomor telepon sudah terdaftar",
+                            "value": {"detail": "Nomor telepon sudah terdaftar di sistem"}
+                        },
+                        "email_exists": {
+                            "summary": "Email sudah terdaftar",
+                            "value": {"detail": "Email sudah terdaftar di sistem"}
+                        },
+                        "password_short": {
+                            "summary": "Password terlalu pendek",
+                            "value": {"detail": "Password minimal 6 karakter"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        }
+    }
+)
+async def update_my_user(
+    user_update: UserUpdateProfile,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Update data user yang sedang login.
+    
+    Args:
+        user_update: Data update untuk user (email, phone, full_name, password)
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Returns:
+        User: Data user yang sudah diupdate
+        
+    Raises:
+        HTTPException 400: Data tidak valid atau sudah terdaftar
+        HTTPException 403: Jika bukan role ibu_hamil
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Validasi: jika phone diupdate, pastikan tidak duplikat
+    if user_update.phone and user_update.phone != current_user.phone:
+        existing_user = crud_user.get_by_phone(db, phone=user_update.phone)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nomor telepon sudah terdaftar di sistem. Silakan gunakan nomor lain.",
+            )
+    
+    # Validasi: jika email diupdate, pastikan tidak duplikat
+    if user_update.email and user_update.email != current_user.email:
+        existing_user = crud_user.get_by_email(db, email=user_update.email)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email sudah terdaftar di sistem. Silakan gunakan email lain.",
+            )
+    
+    # Prepare update data
+    update_data = user_update.model_dump(exclude_unset=True, exclude={"password"})
+    
+    # Update password jika diisi
+    if user_update.password:
+        crud_user.update_password(db, user_id=current_user.id, new_password=user_update.password)
+    
+    # Update user data
+    updated_user = crud_user.update(db, db_obj=current_user, obj_in=update_data)
+    
+    return updated_user
+
+
+@router.post(
+    "/me/profile-photo",
+    response_model=IbuHamilResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload foto profil ibu hamil (untuk profile setting)",
+    description="""
+Upload foto profil untuk ibu hamil yang sedang login.
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Hanya dapat upload foto untuk dirinya sendiri
+
+**Format File:**
+- Format yang didukung: JPG, JPEG, PNG, GIF
+- Ukuran maksimal: 5MB
+
+**Catatan:**
+- Jika sudah ada foto sebelumnya, foto lama akan diganti
+- Foto akan disimpan di server dan URL akan disimpan di database
+""",
+    responses={
+        200: {
+            "description": "Foto profil berhasil diupload",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 18,
+                        "user_id": 15,
+                        "nama_lengkap": "Siti Aminah",
+                        "profile_photo_url": "/uploads/profile_photos/ibu_hamil/ibu_hamil_18_20260109_220000.jpg",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "File tidak valid atau terlalu besar",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_format": {
+                            "summary": "Format file tidak didukung",
+                            "value": {"detail": "File format not allowed. Allowed formats: jpg, jpeg, png, gif"}
+                        },
+                        "file_too_large": {
+                            "summary": "File terlalu besar",
+                            "value": {"detail": "File too large. Max size: 5MB"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def upload_my_profile_photo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> IbuHamil:
+    """
+    Upload foto profil untuk ibu hamil yang sedang login.
+    
+    Args:
+        file: File foto yang akan diupload (JPG, PNG, GIF, max 5MB)
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Returns:
+        IbuHamil: Data ibu hamil dengan profile_photo_url yang sudah diupdate
+        
+    Raises:
+        HTTPException 400: File tidak valid atau terlalu besar
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+    
+    try:
+        # Save file and get path
+        photo_path = await save_profile_photo(file, "ibu_hamil", ibu.id)
+        
+        # Update ibu hamil record
+        ibu_hamil_update_data = {"profile_photo_url": photo_path}
+        ibu = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_hamil_update_data)
+        
+        return ibu
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengupload foto: {str(e)}",
+        )
+
+
+@router.delete(
+    "/me/profile-photo",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Hapus foto profil ibu hamil (untuk profile setting)",
+    description="""
+Hapus foto profil untuk ibu hamil yang sedang login.
+
+**Akses:**
+- Hanya dapat diakses oleh ibu hamil yang sedang login (role: ibu_hamil)
+- Hanya dapat menghapus foto untuk dirinya sendiri
+
+**Catatan:**
+- Endpoint ini akan menghapus URL foto dari database
+- File foto di server mungkin masih ada (tidak dihapus secara fisik)
+""",
+    responses={
+        204: {
+            "description": "Foto profil berhasil dihapus"
+        },
+        403: {
+            "description": "Bukan akun ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def delete_my_profile_photo(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Hapus foto profil untuk ibu hamil yang sedang login.
+    
+    Args:
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+        
+    Raises:
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+    
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+    
+    # Clear photo URL
+    ibu_hamil_update = {"profile_photo_url": None}
+    crud_ibu_hamil.update(db, db_obj=ibu, obj_in=ibu_hamil_update)
 
 
 @router.get(

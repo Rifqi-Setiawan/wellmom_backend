@@ -1,11 +1,14 @@
 """Pydantic schemas for `IbuHamil` (Pregnant Woman) domain objects."""
 
 from datetime import date, datetime
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_serializer, field_validator
 from geoalchemy2.elements import WKBElement
 from shapely import wkb
+
+if TYPE_CHECKING:
+    from app.schemas.user import UserResponse
 
 
 RISK_LEVELS = {"low", "normal", "high"}
@@ -410,5 +413,98 @@ class IbuHamilResponse(BaseModel):
             "provinsi": "Jambi",
             "created_at": "2025-01-01T10:00:00Z",
             "updated_at": "2025-01-02T11:00:00Z",
+        }
+    })
+
+
+# ============================================================================
+# PROFILE SETTING SCHEMAS
+# ============================================================================
+
+class IbuHamilProfileResponse(BaseModel):
+    """Schema untuk response profil lengkap ibu hamil (gabungan user + ibu hamil)
+    
+    Digunakan untuk halaman profile setting yang menampilkan semua data user dan ibu hamil.
+    """
+    # User data - using forward reference to avoid circular import
+    user: Any  # Will be validated as UserResponse at runtime
+    
+    # Ibu hamil data
+    ibu_hamil: IbuHamilResponse
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "user": {
+                "id": 15,
+                "email": "siti.aminah@example.com",
+                "phone": "+6281234567890",
+                "full_name": "Siti Aminah",
+                "role": "ibu_hamil",
+                "profile_photo_url": None,
+                "is_active": True,
+                "is_verified": False,
+                "created_at": "2026-01-09T21:18:41.584534",
+                "updated_at": "2026-01-09T21:18:41.584534"
+            },
+            "ibu_hamil": {
+                "id": 18,
+                "user_id": 15,
+                "puskesmas_id": 1,
+                "perawat_id": None,
+                "nama_lengkap": "Siti Aminah",
+                "nik": "3175091201850001",
+                "date_of_birth": "1985-12-12",
+                "age": 39,
+                "blood_type": "O+",
+                "location": [101.3912, -2.0645],
+                "address": "Jl. Mawar No. 10, RT 02 RW 05",
+                "provinsi": "Jambi",
+                "kota_kabupaten": "Kerinci",
+                "is_active": True,
+                "created_at": "2026-01-09T21:18:41.640648",
+                "updated_at": "2026-01-09T21:18:41.640648"
+            }
+        }
+    })
+
+
+class UserUpdateProfile(BaseModel):
+    """Schema untuk update data user oleh user sendiri (untuk profile setting)
+    
+    Hanya field yang bisa diupdate oleh user sendiri:
+    - email
+    - phone
+    - full_name
+    - password (optional, jika diisi akan diupdate)
+    """
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    full_name: Optional[str] = None
+    password: Optional[str] = None  # Jika diisi, akan diupdate password
+    
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not __import__("re").match(r"^\+?\d{8,15}$", v):
+            raise ValueError("Phone must be 8-15 digits, optional leading '+'")
+        return v
+    
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if len(v) < 6:
+            raise ValueError("Password minimal 6 karakter")
+        return v
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "siti.new@example.com",
+            "phone": "+628111222333",
+            "full_name": "Siti Aminah Updated",
+            "password": "NewPassword123!"
         }
     })
