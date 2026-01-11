@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # Frontend base URL
     FRONTEND_BASE_URL: str = "http://103.191.92.29"
     
+    # Gemini AI Chatbot
+    GEMINI_API_KEY: str = ""
+    CHATBOT_USER_DAILY_TOKEN_LIMIT: int = 10000      # Per user per day
+    CHATBOT_GLOBAL_DAILY_TOKEN_LIMIT: int = 500000     # Total all users per day
+    CHATBOT_RATE_LIMIT_PER_MINUTE: int = 10            # Max requests per user per minute
+    CHATBOT_REQUEST_TIMEOUT: int = 30                  # Seconds
+    CHATBOT_MAX_HISTORY_MESSAGES: int = 20             # Messages to include for context
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -14,6 +14,12 @@ from .message import crud_message
 from .post import crud_post
 from .post_like import crud_post_like
 from .post_reply import crud_post_reply
+from .chatbot import (
+    crud_chatbot_conversation,
+    crud_chatbot_message,
+    crud_chatbot_user_usage,
+    crud_chatbot_global_usage,
+)
 
 
 __all__ = [
@@ -33,4 +39,9 @@ __all__ = [
     "crud_post",
     "crud_post_like",
     "crud_post_reply",
+    # Chatbot CRUD
+    "crud_chatbot_conversation",
+    "crud_chatbot_message",
+    "crud_chatbot_user_usage",
+    "crud_chatbot_global_usage",
 ]

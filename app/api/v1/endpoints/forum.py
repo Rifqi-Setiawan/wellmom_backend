@@ -131,6 +131,96 @@ def list_posts(
 
 
 @router.get(
+    "/recent",
+    response_model=PostListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get recent forum posts",
+    description="""
+    Get list of recent forum posts sorted by creation date (newest first).
+    
+    **Features:**
+    - Posts are sorted by `created_at` descending (newest first)
+    - Only non-deleted posts are returned
+    - Optional filter by days (e.g., `days=7` for posts from last week)
+    
+    **Query Parameters:**
+    - `skip`: Number of posts to skip (for pagination)
+    - `limit`: Maximum number of posts to return (default: 20, max: 100)
+    - `days`: Optional filter to get posts from last N days (e.g., 7 for last week, 30 for last month)
+    
+    **Access:** All authenticated users
+    """,
+    responses={
+        200: {
+            "description": "List of recent posts",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "posts": [
+                            {
+                                "id": 1,
+                                "author_user_id": 10,
+                                "author_name": "Siti Aminah",
+                                "author_role": "ibu_hamil",
+                                "title": "Tips menjaga kesehatan saat hamil",
+                                "details": "Bagaimana cara menjaga kesehatan...",
+                                "like_count": 5,
+                                "reply_count": 3,
+                                "is_liked": False,
+                                "created_at": "2026-01-09T10:00:00Z",
+                                "updated_at": "2026-01-09T10:00:00Z"
+                            }
+                        ],
+                        "total": 50,
+                        "has_more": True
+                    }
+                }
+            }
+        }
+    }
+)
+def get_recent_posts(
+    skip: int = Query(0, ge=0, description="Number of posts to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of posts to return"),
+    days: Optional[int] = Query(None, ge=1, description="Filter posts from last N days (e.g., 7 for last week)"),
+    current_user: Optional[User] = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PostListResponse:
+    """
+    Get recent forum posts sorted by creation date (newest first).
+    
+    Args:
+        skip: Number of posts to skip (for pagination)
+        limit: Maximum number of posts to return
+        days: Optional filter to get posts from last N days
+        current_user: Current authenticated user (optional)
+        db: Database session
+        
+    Returns:
+        PostListResponse: List of recent posts with pagination info
+    """
+    # Get recent posts
+    posts = crud_post.get_recent_posts(
+        db, skip=skip, limit=limit, days=days
+    )
+    
+    # Get total count
+    total = crud_post.get_recent_posts_count(db, days=days)
+    
+    # Enrich posts with author info and like status
+    enriched_posts = [
+        _enrich_post_response(db, post, current_user.id if current_user else None)
+        for post in posts
+    ]
+    
+    return PostListResponse(
+        posts=enriched_posts,
+        total=total,
+        has_more=(skip + len(posts) < total)
+    )
+
+
+@router.get(
     "/{post_id}",
     response_model=PostDetailResponse,
     status_code=status.HTTP_200_OK,

@@ -1,7 +1,7 @@
 """CRUD operations for Post."""
 
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import select, and_, or_, func, desc
 from sqlalchemy.orm import Session
 
@@ -121,6 +121,62 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         )
         like = db.scalars(stmt).first()
         return like is not None
+    
+    def get_recent_posts(
+        self,
+        db: Session,
+        *,
+        skip: int = 0,
+        limit: int = 20,
+        days: Optional[int] = None  # Filter posts from last N days
+    ) -> List[Post]:
+        """Get recent posts sorted by created_at (newest first).
+        
+        Args:
+            db: Database session
+            skip: Number of posts to skip
+            limit: Maximum number of posts to return
+            days: Optional filter to get posts from last N days (e.g., 7 for last week)
+        
+        Returns:
+            List of recent posts sorted by created_at descending
+        """
+        stmt = select(Post).where(Post.is_deleted == False)
+        
+        # Filter by days if specified
+        if days is not None:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            stmt = stmt.where(Post.created_at >= cutoff_date)
+        
+        # Sort by created_at descending (newest first)
+        stmt = stmt.order_by(desc(Post.created_at))
+        
+        stmt = stmt.offset(skip).limit(limit)
+        return list(db.scalars(stmt).all())
+    
+    def get_recent_posts_count(
+        self,
+        db: Session,
+        *,
+        days: Optional[int] = None
+    ) -> int:
+        """Get count of recent posts.
+        
+        Args:
+            db: Database session
+            days: Optional filter to count posts from last N days
+        
+        Returns:
+            Total count of recent posts
+        """
+        stmt = select(func.count(Post.id)).where(Post.is_deleted == False)
+        
+        # Filter by days if specified
+        if days is not None:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            stmt = stmt.where(Post.created_at >= cutoff_date)
+        
+        return db.scalar(stmt) or 0
 
 
 # Singleton instance

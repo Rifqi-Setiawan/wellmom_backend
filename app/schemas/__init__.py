@@ -76,6 +76,15 @@ from .post import (
 	PostReplyResponse,
 	PostReplyListResponse,
 )
+from .chatbot import (
+	ChatbotSendRequest,
+	ChatbotSendResponse,
+	ChatbotConversationResponse,
+	ChatbotMessageResponse,
+	ChatbotHistoryResponse,
+	QuotaInfoResponse,
+	ChatbotNewConversationRequest,
+)
 
 __all__ = [
 	# User
@@ -145,4 +154,12 @@ __all__ = [
 	"PostReplyCreate",
 	"PostReplyResponse",
 	"PostReplyListResponse",
+	# Chatbot
+	"ChatbotSendRequest",
+	"ChatbotSendResponse",
+	"ChatbotConversationResponse",
+	"ChatbotMessageResponse",
+	"ChatbotHistoryResponse",
+	"QuotaInfoResponse",
+	"ChatbotNewConversationRequest",
 ]
