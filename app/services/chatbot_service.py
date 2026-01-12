@@ -285,6 +285,9 @@ class ChatbotService:
                 )
             except Exception as e:
                 error_msg = str(e)
+                error_type = type(e).__name__
+                logger.error(f"Gemini API call error: {error_type}: {error_msg}")
+                
                 # If model not found (404), try to reinitialize with different model
                 if "404" in error_msg and ("not found" in error_msg.lower() or "not supported" in error_msg.lower()):
                     logger.warning(f"Model {self.model_name} not available, trying to reinitialize...")
@@ -305,6 +308,8 @@ class ChatbotService:
                                 break
                             except Exception as retry_error:
                                 retry_error_msg = str(retry_error)
+                                retry_error_type = type(retry_error).__name__
+                                logger.error(f"Retry error with {self.model_name}: {retry_error_type}: {retry_error_msg}")
                                 if "404" in retry_error_msg and ("not found" in retry_error_msg.lower() or "not supported" in retry_error_msg.lower()):
                                     # This model also doesn't work, try next one
                                     retry_count += 1
@@ -358,35 +363,57 @@ class ChatbotService:
             
         except TimeoutError:
             raise
+        except ValueError:
+            # Re-raise ValueError as-is (already has user-friendly message)
+            raise
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Gemini API error: {error_msg}")
+            error_type = type(e).__name__
+            logger.error(f"Gemini API error: {error_type}: {error_msg}", exc_info=True)
             
             # Handle specific Gemini API errors
-            if "404" in error_msg or "not found" in error_msg.lower():
+            error_lower = error_msg.lower()
+            
+            if "404" in error_msg or "not found" in error_lower:
                 # Model not found - try to reinitialize with different model
                 logger.error(f"Model not found error: {error_msg}")
                 raise ValueError(
                     "Model AI tidak ditemukan. Silakan hubungi administrator untuk memperbarui konfigurasi."
                 )
-            elif "safety" in error_msg.lower() or "blocked" in error_msg.lower():
+            elif "safety" in error_lower or "blocked" in error_lower:
                 raise ValueError(
                     "Pesan Anda tidak dapat diproses karena mengandung konten yang tidak sesuai. "
                     "Silakan coba dengan pertanyaan lain."
                 )
-            elif "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
+            elif "quota" in error_lower or "rate limit" in error_lower:
                 raise ValueError(
                     "Layanan AI sedang sibuk. Silakan coba lagi dalam beberapa saat."
                 )
-            elif "api key" in error_msg.lower() or "authentication" in error_msg.lower() or "permission" in error_msg.lower():
+            elif "api key" in error_lower or "authentication" in error_lower or "permission" in error_lower or "invalid api key" in error_lower:
+                logger.error(f"API key authentication error: {error_msg}")
                 raise ValueError(
                     "Konfigurasi layanan AI tidak valid. Silakan hubungi administrator."
                 )
+            elif "403" in error_msg or "forbidden" in error_lower:
+                logger.error(f"API forbidden error: {error_msg}")
+                raise ValueError(
+                    "Akses ke layanan AI ditolak. Silakan hubungi administrator."
+                )
+            elif "400" in error_msg or "bad request" in error_lower:
+                logger.error(f"API bad request error: {error_msg}")
+                raise ValueError(
+                    f"Request tidak valid: {error_msg[:100]}. Silakan coba dengan pesan yang berbeda."
+                )
             else:
                 # Log full error for debugging
-                logger.error(f"Gemini API error details: {error_msg}")
+                logger.error(f"Gemini API unexpected error: {error_type}: {error_msg}")
+                # Provide more specific error message
+                if len(error_msg) > 200:
+                    error_msg_short = error_msg[:200] + "..."
+                else:
+                    error_msg_short = error_msg
                 raise ValueError(
-                    f"Layanan AI sedang mengalami gangguan: {error_msg}. Silakan coba lagi."
+                    f"Layanan AI sedang mengalami gangguan. Error: {error_msg_short}. Silakan coba lagi atau hubungi administrator."
                 )
     
     def count_tokens(self, text: str) -> int:

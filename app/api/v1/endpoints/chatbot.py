@@ -251,20 +251,26 @@ async def send_message(
     except ValueError as e:
         # ValueError from chatbot_service contains user-friendly message
         error_msg = str(e)
-        logger.error(f"Chatbot service error: {error_msg}")
+        error_lower = error_msg.lower()
+        logger.error(f"Chatbot service error: {error_msg}", exc_info=True)
         
-        # Provide more specific error messages based on error content
-        if "API key" in error_msg or "tidak valid" in error_msg:
-            detail = "Konfigurasi layanan AI tidak valid. Silakan hubungi administrator."
-        elif "tidak ditemukan" in error_msg or "not found" in error_msg.lower():
-            detail = "Model AI tidak ditemukan. Silakan hubungi administrator."
-        elif "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
-            detail = "Layanan AI sedang sibuk. Silakan coba lagi dalam beberapa saat."
+        # Use the error message from chatbot_service directly (already user-friendly)
+        # But provide more specific HTTP status codes if possible
+        if "tidak ditemukan" in error_msg or "not found" in error_lower:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            detail = error_msg if error_msg else "Model AI tidak ditemukan. Silakan hubungi administrator."
+        elif "quota" in error_lower or "rate limit" in error_lower or "sibuk" in error_lower:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            detail = error_msg if error_msg else "Layanan AI sedang sibuk. Silakan coba lagi dalam beberapa saat."
+        elif "tidak valid" in error_lower or "api key" in error_lower or "authentication" in error_lower:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            detail = error_msg if error_msg else "Konfigurasi layanan AI tidak valid. Silakan hubungi administrator."
         else:
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             detail = error_msg if error_msg else "Layanan AI sedang mengalami gangguan. Silakan coba lagi."
         
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status_code,
             detail=detail,
         )
     except Exception as e:
