@@ -12,7 +12,7 @@ from app.crud import (
     crud_user,
 )
 from app.models.user import User
-from app.models.post import Post
+from app.models.post import Post, PostCategory
 from app.schemas.post import (
     PostCreate,
     PostUpdate,
@@ -52,6 +52,7 @@ def _enrich_post_response(
         author_role=author.role if author else None,
         title=post.title,
         details=post.details,
+        category=post.category,
         like_count=post.like_count,
         reply_count=post.reply_count,
         is_liked=is_liked,
@@ -68,6 +69,14 @@ def _enrich_post_response(
     description="""
     Create a new forum post.
     
+    **Category options:**
+    - `kesehatan`: Kesehatan
+    - `nutrisi`: Nutrisi
+    - `persiapan`: Persiapan
+    - `curhat`: Curhat
+    - `tips`: Tips
+    - `tanya_jawab`: Tanya Jawab (default)
+    
     **Access:** Ibu Hamil and Perawat only
     """,
 )
@@ -81,7 +90,8 @@ def create_post(
         db,
         author_user_id=current_user.id,
         title=post_in.title,
-        details=post_in.details
+        details=post_in.details,
+        category=post_in.category
     )
     
     return _enrich_post_response(db, post, current_user.id)
@@ -100,6 +110,14 @@ def create_post(
     - `popular`: Most replies first, then most likes
     - `most_liked`: Most likes first
     
+    **Category options:**
+    - `kesehatan`: Kesehatan
+    - `nutrisi`: Nutrisi
+    - `persiapan`: Persiapan
+    - `curhat`: Curhat
+    - `tips`: Tips
+    - `tanya_jawab`: Tanya Jawab
+    
     **Access:** All authenticated users
     """,
 )
@@ -107,15 +125,16 @@ def list_posts(
     skip: int = Query(0, ge=0, description="Number of posts to skip"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of posts to return"),
     sort_by: str = Query("recent", regex="^(recent|popular|most_liked)$", description="Sorting option"),
+    category: Optional[PostCategory] = Query(None, description="Filter by category"),
     current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> PostListResponse:
     """List all forum posts."""
     posts = crud_post.get_all(
-        db, skip=skip, limit=limit, sort_by=sort_by
+        db, skip=skip, limit=limit, sort_by=sort_by, category=category
     )
     
-    total = crud_post.get_total_count(db)
+    total = crud_post.get_total_count(db, category=category)
     
     # Enrich posts with author info and like status
     enriched_posts = [
@@ -183,6 +202,7 @@ def get_recent_posts(
     skip: int = Query(0, ge=0, description="Number of posts to skip"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of posts to return"),
     days: Optional[int] = Query(None, ge=1, description="Filter posts from last N days (e.g., 7 for last week)"),
+    category: Optional[PostCategory] = Query(None, description="Filter by category"),
     current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> PostListResponse:
@@ -193,6 +213,7 @@ def get_recent_posts(
         skip: Number of posts to skip (for pagination)
         limit: Maximum number of posts to return
         days: Optional filter to get posts from last N days
+        category: Optional filter by category
         current_user: Current authenticated user (optional)
         db: Database session
         
@@ -201,11 +222,11 @@ def get_recent_posts(
     """
     # Get recent posts
     posts = crud_post.get_recent_posts(
-        db, skip=skip, limit=limit, days=days
+        db, skip=skip, limit=limit, days=days, category=category
     )
     
     # Get total count
-    total = crud_post.get_recent_posts_count(db, days=days)
+    total = crud_post.get_recent_posts_count(db, days=days, category=category)
     
     # Enrich posts with author info and like status
     enriched_posts = [

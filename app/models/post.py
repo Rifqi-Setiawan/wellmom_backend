@@ -1,9 +1,20 @@
 """Post model for forum discussion."""
 
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Index, Boolean
+from enum import Enum
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Index, Boolean, Enum as SQLEnum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..database import Base
+
+
+class PostCategory(str, Enum):
+    """Forum post categories."""
+    KESEHATAN = "kesehatan"
+    NUTRISI = "nutrisi"
+    PERSIAPAN = "persiapan"
+    CURHAT = "curhat"
+    TIPS = "tips"
+    TANYA_JAWAB = "tanya_jawab"
 
 
 class Post(Base):
@@ -24,6 +35,12 @@ class Post(Base):
     # Post Content
     title = Column(String(500), nullable=False)
     details = Column(Text, nullable=False)
+    category = Column(
+        SQLEnum(PostCategory, name="post_category"),
+        nullable=False,
+        default=PostCategory.TANYA_JAWAB,
+        index=True
+    )
     
     # Metadata
     like_count = Column(Integer, default=0, index=True)  # Denormalized untuk performance
@@ -43,6 +60,8 @@ class Post(Base):
         Index('idx_post_author_created', 'author_user_id', 'created_at'),
         # Index untuk query posts by popularity (like_count, reply_count)
         Index('idx_post_popularity', 'like_count', 'reply_count', 'created_at'),
+        # Index untuk query posts by category
+        Index('idx_post_category_created', 'category', 'created_at'),
     )
     
     # Relationships

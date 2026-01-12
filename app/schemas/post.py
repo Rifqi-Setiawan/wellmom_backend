@@ -3,12 +3,14 @@
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from app.models.post import PostCategory
 
 
 class PostBase(BaseModel):
     """Base schema for Post."""
     title: str = Field(..., min_length=1, max_length=500, description="Post title")
     details: str = Field(..., min_length=1, description="Post content/details")
+    category: PostCategory = Field(..., description="Post category")
 
 
 class PostCreate(PostBase):
@@ -20,6 +22,7 @@ class PostUpdate(BaseModel):
     """Schema for updating a post."""
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     details: Optional[str] = Field(None, min_length=1)
+    category: Optional[PostCategory] = Field(None, description="Post category")
 
 
 class PostResponse(PostBase):
@@ -28,6 +31,7 @@ class PostResponse(PostBase):
     author_user_id: int
     author_name: Optional[str] = None  # Will be populated from user relationship
     author_role: Optional[str] = None  # Will be populated from user relationship
+    category: PostCategory
     like_count: int
     reply_count: int
     is_liked: bool = False  # Will be populated based on current user

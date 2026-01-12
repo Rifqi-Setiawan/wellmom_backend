@@ -6,7 +6,7 @@ from sqlalchemy import select, and_, or_, func, desc
 from sqlalchemy.orm import Session
 
 from app.crud.base import CRUDBase
-from app.models.post import Post
+from app.models.post import Post, PostCategory
 from app.models.post_like import PostLike
 from app.models.post_reply import PostReply
 from app.schemas.post import PostCreate, PostUpdate
@@ -21,13 +21,15 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         *,
         author_user_id: int,
         title: str,
-        details: str
+        details: str,
+        category: PostCategory
     ) -> Post:
         """Create a new post."""
         post = Post(
             author_user_id=author_user_id,
             title=title,
             details=details,
+            category=category,
             like_count=0,
             reply_count=0
         )
@@ -42,10 +44,15 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         *,
         skip: int = 0,
         limit: int = 50,
-        sort_by: str = "recent"  # "recent", "popular", "most_liked"
+        sort_by: str = "recent",  # "recent", "popular", "most_liked"
+        category: Optional[PostCategory] = None
     ) -> List[Post]:
         """Get all posts with pagination and sorting."""
         stmt = select(Post).where(Post.is_deleted == False)
+        
+        # Filter by category if provided
+        if category is not None:
+            stmt = stmt.where(Post.category == category)
         
         # Apply sorting
         if sort_by == "popular":
@@ -65,9 +72,11 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         stmt = stmt.offset(skip).limit(limit)
         return list(db.scalars(stmt).all())
     
-    def get_total_count(self, db: Session) -> int:
+    def get_total_count(self, db: Session, category: Optional[PostCategory] = None) -> int:
         """Get total count of non-deleted posts."""
         stmt = select(func.count(Post.id)).where(Post.is_deleted == False)
+        if category is not None:
+            stmt = stmt.where(Post.category == category)
         return db.scalar(stmt) or 0
     
     def get_by_id(
@@ -128,7 +137,8 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         *,
         skip: int = 0,
         limit: int = 20,
-        days: Optional[int] = None  # Filter posts from last N days
+        days: Optional[int] = None,  # Filter posts from last N days
+        category: Optional[PostCategory] = None
     ) -> List[Post]:
         """Get recent posts sorted by created_at (newest first).
         
@@ -137,11 +147,16 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
             skip: Number of posts to skip
             limit: Maximum number of posts to return
             days: Optional filter to get posts from last N days (e.g., 7 for last week)
+            category: Optional filter by category
         
         Returns:
             List of recent posts sorted by created_at descending
         """
         stmt = select(Post).where(Post.is_deleted == False)
+        
+        # Filter by category if provided
+        if category is not None:
+            stmt = stmt.where(Post.category == category)
         
         # Filter by days if specified
         if days is not None:
@@ -158,18 +173,24 @@ class CRUDPost(CRUDBase[Post, PostCreate, PostUpdate]):
         self,
         db: Session,
         *,
-        days: Optional[int] = None
+        days: Optional[int] = None,
+        category: Optional[PostCategory] = None
     ) -> int:
         """Get count of recent posts.
         
         Args:
             db: Database session
             days: Optional filter to count posts from last N days
+            category: Optional filter by category
         
         Returns:
             Total count of recent posts
         """
         stmt = select(func.count(Post.id)).where(Post.is_deleted == False)
+        
+        # Filter by category if provided
+        if category is not None:
+            stmt = stmt.where(Post.category == category)
         
         # Filter by days if specified
         if days is not None:
