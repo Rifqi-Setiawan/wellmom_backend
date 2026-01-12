@@ -1,0 +1,15 @@
+# Command untuk menjalankan migration add_post_category di VPS
+# Copy-paste command berikut ke terminal VPS:
+
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'post_category') THEN CREATE TYPE post_category AS ENUM ('kesehatan', 'nutrisi', 'persiapan', 'curhat', 'tips', 'tanya_jawab'); END IF; END \$\$;"
+
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'posts' AND column_name = 'category') THEN ALTER TABLE posts ADD COLUMN category post_category NOT NULL DEFAULT 'tanya_jawab'; END IF; END \$\$;"
+
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "CREATE INDEX IF NOT EXISTS idx_posts_category ON posts(category);"
+
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "CREATE INDEX IF NOT EXISTS idx_post_category_created ON posts(category, created_at);"
+
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "COMMENT ON COLUMN posts.category IS 'Forum post category: kesehatan, nutrisi, persiapan, curhat, tips, tanya_jawab';"
+
+# Verifikasi migration (optional):
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "SELECT column_name, data_type, column_default FROM information_schema.columns WHERE table_name = 'posts' AND column_name = 'category';"

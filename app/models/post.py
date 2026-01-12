@@ -1,20 +1,9 @@
 """Post model for forum discussion."""
 
-from enum import Enum
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Index, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Index, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..database import Base
-
-
-class PostCategory(str, Enum):
-    """Forum post categories."""
-    KESEHATAN = "kesehatan"
-    NUTRISI = "nutrisi"
-    PERSIAPAN = "persiapan"
-    CURHAT = "curhat"
-    TIPS = "tips"
-    TANYA_JAWAB = "tanya_jawab"
 
 
 class Post(Base):
@@ -35,10 +24,10 @@ class Post(Base):
     # Post Content
     title = Column(String(500), nullable=False)
     details = Column(Text, nullable=False)
-    category = Column(
-        SQLEnum(PostCategory, name="post_category"),
+    category_id = Column(
+        Integer,
+        ForeignKey("post_categories.id", ondelete="RESTRICT"),
         nullable=False,
-        default=PostCategory.TANYA_JAWAB,
         index=True
     )
     
@@ -61,11 +50,12 @@ class Post(Base):
         # Index untuk query posts by popularity (like_count, reply_count)
         Index('idx_post_popularity', 'like_count', 'reply_count', 'created_at'),
         # Index untuk query posts by category
-        Index('idx_post_category_created', 'category', 'created_at'),
+        Index('idx_post_category_created', 'category_id', 'created_at'),
     )
     
     # Relationships
     author = relationship("User", foreign_keys=[author_user_id])
+    category_obj = relationship("PostCategory", foreign_keys=[category_id], back_populates="posts")
     likes = relationship(
         "PostLike", 
         back_populates="post",

@@ -63,6 +63,13 @@ from .message import (
 	MarkReadRequest,
 	UnreadCountResponse,
 )
+from .post_category import (
+	PostCategoryBase,
+	PostCategoryCreate,
+	PostCategoryUpdate,
+	PostCategoryResponse,
+	PostCategoryListResponse,
+)
 from .post import (
 	PostBase,
 	PostCreate,

@@ -13,6 +13,7 @@ from .notification import Notification
 from .transfer_request import TransferRequest
 from .conversation import Conversation
 from .message import Message
+from .post_category import PostCategory
 from .post import Post
 from .post_like import PostLike
 from .post_reply import PostReply
@@ -36,6 +37,7 @@ __all__ = [
     "TransferRequest",
     "Conversation",
     "Message",
+    "PostCategory",
     "Post",
     "PostLike",
     "PostReply",

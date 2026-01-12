@@ -9,10 +9,11 @@ from app.crud import (
     crud_post,
     crud_post_like,
     crud_post_reply,
+    crud_post_category,
     crud_user,
 )
 from app.models.user import User
-from app.models.post import Post, PostCategory
+from app.models.post import Post
 from app.schemas.post import (
     PostCreate,
     PostUpdate,
@@ -23,6 +24,10 @@ from app.schemas.post import (
     PostReplyCreate,
     PostReplyResponse,
     PostReplyListResponse,
+)
+from app.schemas.post_category import (
+    PostCategoryResponse,
+    PostCategoryListResponse,
 )
 
 router = APIRouter(
@@ -36,8 +41,9 @@ def _enrich_post_response(
     post: Post,
     current_user_id: Optional[int] = None
 ) -> PostResponse:
-    """Enrich post with author info and like status."""
+    """Enrich post with author info, category info, and like status."""
     author = crud_user.get(db, post.author_user_id)
+    category = crud_post_category.get(db, post.category_id) if post.category_id else None
     is_liked = False
     
     if current_user_id:
@@ -52,12 +58,36 @@ def _enrich_post_response(
         author_role=author.role if author else None,
         title=post.title,
         details=post.details,
-        category=post.category,
+        category_id=post.category_id,
+        category_name=category.name if category else None,
+        category_display_name=category.display_name if category else None,
         like_count=post.like_count,
         reply_count=post.reply_count,
         is_liked=is_liked,
         created_at=post.created_at,
         updated_at=post.updated_at,
+    )
+
+
+@router.get(
+    "/categories",
+    response_model=PostCategoryListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get all post categories",
+    description="""
+    Get list of all active forum post categories.
+    
+    **Access:** All authenticated users
+    """,
+)
+def get_categories(
+    current_user: Optional[User] = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PostCategoryListResponse:
+    """Get all active post categories."""
+    categories = crud_post_category.get_all_active(db)
+    return PostCategoryListResponse(
+        categories=[PostCategoryResponse.model_validate(cat) for cat in categories]
     )
 
 
@@ -69,14 +99,6 @@ def _enrich_post_response(
     description="""
     Create a new forum post.
     
-    **Category options:**
-    - `kesehatan`: Kesehatan
-    - `nutrisi`: Nutrisi
-    - `persiapan`: Persiapan
-    - `curhat`: Curhat
-    - `tips`: Tips
-    - `tanya_jawab`: Tanya Jawab (default)
-    
     **Access:** Ibu Hamil and Perawat only
     """,
 )
@@ -86,12 +108,20 @@ def create_post(
     db: Session = Depends(get_db),
 ) -> PostResponse:
     """Create a new forum post."""
+    # Verify category exists
+    category = crud_post_category.get(db, post_in.category_id)
+    if not category or not category.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kategori tidak ditemukan atau tidak aktif."
+        )
+    
     post = crud_post.create_post(
         db,
         author_user_id=current_user.id,
         title=post_in.title,
         details=post_in.details,
-        category=post_in.category
+        category_id=post_in.category_id
     )
     
     return _enrich_post_response(db, post, current_user.id)
@@ -110,13 +140,8 @@ def create_post(
     - `popular`: Most replies first, then most likes
     - `most_liked`: Most likes first
     
-    **Category options:**
-    - `kesehatan`: Kesehatan
-    - `nutrisi`: Nutrisi
-    - `persiapan`: Persiapan
-    - `curhat`: Curhat
-    - `tips`: Tips
-    - `tanya_jawab`: Tanya Jawab
+    **Query Parameters:**
+    - `category_id`: Optional filter by category ID (use GET /forum/categories to get available categories)
     
     **Access:** All authenticated users
     """,
@@ -125,16 +150,16 @@ def list_posts(
     skip: int = Query(0, ge=0, description="Number of posts to skip"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of posts to return"),
     sort_by: str = Query("recent", regex="^(recent|popular|most_liked)$", description="Sorting option"),
-    category: Optional[PostCategory] = Query(None, description="Filter by category"),
+    category_id: Optional[int] = Query(None, gt=0, description="Filter by category ID"),
     current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> PostListResponse:
     """List all forum posts."""
     posts = crud_post.get_all(
-        db, skip=skip, limit=limit, sort_by=sort_by, category=category
+        db, skip=skip, limit=limit, sort_by=sort_by, category_id=category_id
     )
     
-    total = crud_post.get_total_count(db, category=category)
+    total = crud_post.get_total_count(db, category_id=category_id)
     
     # Enrich posts with author info and like status
     enriched_posts = [
@@ -202,7 +227,7 @@ def get_recent_posts(
     skip: int = Query(0, ge=0, description="Number of posts to skip"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of posts to return"),
     days: Optional[int] = Query(None, ge=1, description="Filter posts from last N days (e.g., 7 for last week)"),
-    category: Optional[PostCategory] = Query(None, description="Filter by category"),
+    category_id: Optional[int] = Query(None, gt=0, description="Filter by category ID"),
     current_user: Optional[User] = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> PostListResponse:
@@ -213,7 +238,7 @@ def get_recent_posts(
         skip: Number of posts to skip (for pagination)
         limit: Maximum number of posts to return
         days: Optional filter to get posts from last N days
-        category: Optional filter by category
+        category_id: Optional filter by category ID
         current_user: Current authenticated user (optional)
         db: Database session
         
@@ -222,11 +247,11 @@ def get_recent_posts(
     """
     # Get recent posts
     posts = crud_post.get_recent_posts(
-        db, skip=skip, limit=limit, days=days, category=category
+        db, skip=skip, limit=limit, days=days, category_id=category_id
     )
     
     # Get total count
-    total = crud_post.get_recent_posts_count(db, days=days, category=category)
+    total = crud_post.get_recent_posts_count(db, days=days, category_id=category_id)
     
     # Enrich posts with author info and like status
     enriched_posts = [
@@ -323,6 +348,15 @@ def update_post(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Anda tidak memiliki izin untuk mengupdate post ini."
         )
+    
+    # Verify category if provided
+    if post_update.category_id is not None:
+        category = crud_post_category.get(db, post_update.category_id)
+        if not category or not category.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Kategori tidak ditemukan atau tidak aktif."
+            )
     
     updated_post = crud_post.update(db, db_obj=post, obj_in=post_update)
     return _enrich_post_response(db, updated_post, current_user.id)
