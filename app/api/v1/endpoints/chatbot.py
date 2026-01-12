@@ -1,5 +1,6 @@
 """AI Chatbot endpoints for WellMom Assistant."""
 
+import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -26,6 +27,8 @@ from app.schemas.chatbot import (
     ChatbotNewConversationRequest,
 )
 from app.services.chatbot_service import chatbot_service, get_chatbot_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/chatbot",
@@ -240,24 +243,40 @@ async def send_message(
             timeout=settings.CHATBOT_REQUEST_TIMEOUT
         )
     except TimeoutError as e:
+        logger.error(f"Chatbot request timeout: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e),
+            detail="Waktu respons habis. Silakan coba lagi dalam beberapa saat.",
         )
     except ValueError as e:
         # ValueError from chatbot_service contains user-friendly message
+        error_msg = str(e)
+        logger.error(f"Chatbot service error: {error_msg}")
+        
+        # Provide more specific error messages based on error content
+        if "API key" in error_msg or "tidak valid" in error_msg:
+            detail = "Konfigurasi layanan AI tidak valid. Silakan hubungi administrator."
+        elif "tidak ditemukan" in error_msg or "not found" in error_msg.lower():
+            detail = "Model AI tidak ditemukan. Silakan hubungi administrator."
+        elif "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
+            detail = "Layanan AI sedang sibuk. Silakan coba lagi dalam beberapa saat."
+        else:
+            detail = error_msg if error_msg else "Layanan AI sedang mengalami gangguan. Silakan coba lagi."
+        
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e),
+            detail=detail,
         )
     except Exception as e:
         # Log the actual error for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Unexpected error in chatbot service: {str(e)}")
+        error_type = type(e).__name__
+        error_msg = str(e)
+        logger.error(f"Unexpected error in chatbot service: {error_type}: {error_msg}", exc_info=True)
+        
+        # Provide user-friendly error message
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Layanan AI sedang mengalami gangguan. Silakan coba lagi.",
+            detail="Layanan AI sedang mengalami gangguan. Silakan coba lagi dalam beberapa saat.",
         )
     
     # Step 7: Save messages to database
@@ -813,9 +832,7 @@ async def get_chatbot_status(
         status_info = service.get_status()
         return status_info
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error checking chatbot status: {str(e)}")
+        logger.error(f"Error checking chatbot status: {str(e)}", exc_info=True)
         return {
             "is_available": False,
             "model_name": None,

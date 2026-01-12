@@ -70,3 +70,11 @@ desktop.ini
 # Documentation files (not needed in production)
 *.md
 !README.md
+
+# Test, Debug, and Check scripts (not needed in production)
+test_*.py
+debug_*.py
+check_*.py
+*_test.py
+*_debug.py
+*_check.py
