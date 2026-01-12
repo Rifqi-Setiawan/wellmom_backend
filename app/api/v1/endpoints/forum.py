@@ -56,6 +56,7 @@ def _enrich_post_response(
         author_user_id=post.author_user_id,
         author_name=author.full_name if author else None,
         author_role=author.role if author else None,
+        author_photo_url=author.profile_photo_url if author else None,
         title=post.title,
         details=post.details,
         category_id=post.category_id,
@@ -303,6 +304,7 @@ def get_post_detail(
             author_user_id=reply.author_user_id,
             author_name=author.full_name if author else None,
             author_role=author.role if author else None,
+            author_photo_url=author.profile_photo_url if author else None,
             reply_text=reply.reply_text,
             parent_reply_id=reply.parent_reply_id,
             created_at=reply.created_at,
@@ -403,12 +405,12 @@ def delete_post(
     description="""
     Like or unlike a post. If already liked, it will unlike. If not liked, it will like.
     
-    **Access:** All authenticated users
+    **Access:** Ibu Hamil and Perawat only
     """,
 )
 def toggle_like_post(
     post_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_role("ibu_hamil", "perawat")),
     db: Session = Depends(get_db),
 ) -> PostLikeResponse:
     """Toggle like on a post."""
@@ -472,6 +474,7 @@ def get_post_replies(
             author_user_id=reply.author_user_id,
             author_name=author.full_name if author else None,
             author_role=author.role if author else None,
+            author_photo_url=author.profile_photo_url if author else None,
             reply_text=reply.reply_text,
             parent_reply_id=reply.parent_reply_id,
             created_at=reply.created_at,
@@ -492,13 +495,13 @@ def get_post_replies(
     description="""
     Create a reply/comment to a post.
     
-    **Access:** All authenticated users
+    **Access:** Ibu Hamil and Perawat only
     """,
 )
 def create_reply(
     post_id: int,
     reply_in: PostReplyCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_role("ibu_hamil", "perawat")),
     db: Session = Depends(get_db),
 ) -> PostReplyResponse:
     """Create a reply to a post."""
@@ -518,6 +521,7 @@ def create_reply(
             author_user_id=reply.author_user_id,
             author_name=author.full_name if author else None,
             author_role=author.role if author else None,
+            author_photo_url=author.profile_photo_url if author else None,
             reply_text=reply.reply_text,
             parent_reply_id=reply.parent_reply_id,
             created_at=reply.created_at,

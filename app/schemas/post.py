@@ -30,6 +30,7 @@ class PostResponse(PostBase):
     author_user_id: int
     author_name: Optional[str] = None  # Will be populated from user relationship
     author_role: Optional[str] = None  # Will be populated from user relationship
+    author_photo_url: Optional[str] = None  # Will be populated from user relationship
     category_id: int
     category_name: Optional[str] = None  # Will be populated from category relationship
     category_display_name: Optional[str] = None  # Will be populated from category relationship
@@ -80,6 +81,7 @@ class PostReplyResponse(BaseModel):
     author_user_id: int
     author_name: Optional[str] = None
     author_role: Optional[str] = None
+    author_photo_url: Optional[str] = None
     reply_text: str
     parent_reply_id: Optional[int] = None
     created_at: datetime
