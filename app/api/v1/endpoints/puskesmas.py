@@ -1,15 +1,16 @@
 """Puskesmas endpoints."""
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, require_role
 from app.crud import crud_ibu_hamil, crud_notification, crud_perawat, crud_puskesmas, crud_user
 from app.models.ibu_hamil import IbuHamil
+from app.models.perawat import Perawat
 from app.models.puskesmas import Puskesmas
 from app.models.user import User
 from app.schemas.ibu_hamil import IbuHamilResponse
@@ -135,6 +136,60 @@ async def list_puskesmas(
         .limit(limit)
     )
     return db.scalars(stmt).all()
+
+
+@router.get(
+    "/admin/all",
+    response_model=List[PuskesmasAdminResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Admin list all puskesmas sorted by newest registration",
+)
+async def admin_list_all_puskesmas(
+    skip: int = 0,
+    limit: int = 100,
+    status_filter: Optional[str] = None,
+    current_user: User = Depends(require_role("super_admin")),
+    db: Session = Depends(get_db),
+) -> List[PuskesmasAdminResponse]:
+    """
+    Admin-only list of ALL puskesmas sorted by newest registration first.
+    
+    Query params:
+    - skip: Number of records to skip (default 0)
+    - limit: Max records to return (default 100)
+    - status_filter: Filter by registration_status (pending_approval, approved, rejected, draft)
+    """
+    stmt = select(Puskesmas).order_by(Puskesmas.registration_date.desc())
+    
+    # Apply status filter if provided
+    if status_filter:
+        stmt = stmt.where(Puskesmas.registration_status == status_filter)
+    
+    stmt = stmt.offset(skip).limit(limit)
+    puskesmas_list = db.scalars(stmt).all()
+    
+    # Build response with stats for each puskesmas
+    result = []
+    for puskesmas in puskesmas_list:
+        # Count active ibu hamil for this puskesmas
+        ibu_count = db.scalar(
+            select(func.count(IbuHamil.id)).where(
+                IbuHamil.puskesmas_id == puskesmas.id,
+                IbuHamil.is_active == True
+            )
+        ) or 0
+        
+        # Count active perawat for this puskesmas
+        perawat_count = db.scalar(
+            select(func.count(Perawat.id)).where(
+                Perawat.puskesmas_id == puskesmas.id,
+                Perawat.is_active == True
+            )
+        ) or 0
+        
+        result.append(_build_admin_response(puskesmas, ibu_count, perawat_count))
+    
+    return result
 
 
 @router.get(
