@@ -1,17 +1,18 @@
 """Perawat activation and profile endpoints (FR-TK-001).
 
 Flow:
-- Puskesmas generates account (existing in project via Perawat schemas/CRUD)
-- Nurse receives verification link (token)
-- Verify email -> set password -> complete profile (photo)
-- Accept T&C -> account active
+- Puskesmas generates account dengan email dan NIP
+- Password otomatis = NIP
+- Nurse receives verification link (token) via email
+- Verify email -> login dengan email + password
+- Perawat dapat reset password sendiri
 
 Notes:
 - We store verification token in users.verification_token.
-- Bio and terms timestamp are not in current models; proposing add later.
+- Password awal menggunakan NIP, perawat wajib ganti setelah login pertama.
 """
 
-import secrets
+from datetime import timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
@@ -20,10 +21,20 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, require_role
 from app.config import settings
+from app.core.security import create_access_token, verify_password
 from app.crud import crud_user, crud_perawat, crud_puskesmas
 from app.models.user import User
 from app.models.perawat import Perawat as PerawatModel
-from app.schemas.perawat import PerawatRegisterWithUser, PerawatResponse
+from app.schemas.perawat import (
+    PerawatRegisterWithUser,
+    PerawatResponse,
+    PerawatGenerate,
+    PerawatLoginRequest,
+    PerawatLoginResponse,
+    PerawatLoginUserInfo,
+    PerawatLoginPerawatInfo,
+    PerawatResetPasswordRequest,
+)
 from app.schemas.user import UserCreate
 from app.services.email import EmailNotConfigured, send_email
 from app.utils.file_handler import save_profile_photo
@@ -111,67 +122,256 @@ def _build_activation_email(*, token: str, nurse_name: str, puskesmas_name: str)
 @router.post(
     "/generate",
     status_code=status.HTTP_201_CREATED,
-    summary="Puskesmas generate akun perawat dan kirim email aktivasi",
+    summary="Puskesmas generate akun perawat (email + NIP)",
+    description="""
+Generate akun perawat baru oleh Puskesmas.
+
+## Request Body
+- **email**: Email perawat (untuk login dan menerima aktivasi)
+- **nip**: NIP perawat (juga digunakan sebagai password awal)
+
+## Flow
+1. Puskesmas memasukkan email dan NIP perawat
+2. Sistem membuat akun user dan perawat
+3. Password otomatis menggunakan NIP
+4. Email aktivasi dikirim ke perawat
+5. Perawat dapat login dengan email + password (NIP)
+6. Perawat disarankan untuk mengubah password setelah login pertama
+
+## Response
+Mengembalikan informasi akun yang dibuat dan link aktivasi.
+    """,
 )
 def generate_perawat_account(
-    payload: PerawatRegisterWithUser,
+    payload: PerawatGenerate,
     current_user: User = Depends(require_role("puskesmas")),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Puskesmas creates a nurse account, stores verification token, and emails activation link."""
+    """Puskesmas creates a nurse account with email and NIP. Password = NIP."""
     puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
     if not puskesmas:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Puskesmas profile not found for this user")
 
     # Uniqueness checks
-    if crud_user.get_by_phone(db, phone=payload.phone):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone already registered")
     if crud_user.get_by_email(db, email=payload.email):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email sudah terdaftar")
+    if crud_perawat.get_by_email(db, email=payload.email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email sudah terdaftar sebagai perawat")
+    if crud_perawat.get_by_nip(db, nip=payload.nip):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="NIP sudah terdaftar")
 
-    # Create user with temporary password; mark inactive until activation
-    temp_password = secrets.token_urlsafe(8)
+    # Extract name from email (before @) as placeholder
+    email_name = payload.email.split("@")[0].replace(".", " ").replace("_", " ").title()
+    full_name = email_name if email_name else f"Perawat {payload.nip}"
+    
+    # Generate placeholder phone (will be updated by perawat later)
+    placeholder_phone = f"+62000{payload.nip[-8:]}" if len(payload.nip) >= 8 else f"+62000{payload.nip}"
+
+    # Create user with password = NIP
     user = crud_user.create_user(
         db,
         user_in=UserCreate(
-            phone=payload.phone,
-            password=temp_password,
-            full_name=payload.full_name,
+            phone=placeholder_phone,
+            password=payload.nip,  # Password = NIP
+            full_name=full_name,
             role="perawat",
             email=payload.email,
         ),
     )
-    user.is_active = False
+    user.is_active = False  # Inactive until activation
     user.is_verified = False
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Defer perawat profile creation until after login.
-    # Only user account is generated at this step.
+    # Create perawat profile linked to user and puskesmas
+    perawat = PerawatModel(
+        user_id=user.id,
+        puskesmas_id=puskesmas.id,
+        nama_lengkap=full_name,
+        email=payload.email,
+        nomor_hp=placeholder_phone,
+        nip=payload.nip,
+        is_active=False,  # Inactive until activation
+    )
+    db.add(perawat)
+    db.commit()
+    db.refresh(perawat)
 
+    # Create verification token
     token = crud_user.create_verification_token(db, user_id=user.id)
     if not token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create verification token")
 
     subject, html_body, text_body = _build_activation_email(
-        token=token, nurse_name=user.full_name, puskesmas_name=puskesmas.name
+        token=token, nurse_name=full_name, puskesmas_name=puskesmas.name
     )
+    
+    email_sent = False
     try:
-        send_email(to_email=user.email, subject=subject, html_content=html_body, text_content=text_body)
-    except EmailNotConfigured as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        send_email(to_email=payload.email, subject=subject, html_content=html_body, text_content=text_body)
+        email_sent = True
+    except EmailNotConfigured:
+        # Email not configured, but account is still created
+        email_sent = False
+    except Exception:
+        email_sent = False
 
     activation_link = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/perawat/activate?token={token}"
 
     return {
         "user_id": user.id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "phone": user.phone,
-        "role": user.role,
+        "perawat_id": perawat.id,
+        "email": payload.email,
+        "nip": payload.nip,
+        "full_name": full_name,
+        "puskesmas_id": puskesmas.id,
+        "puskesmas_name": puskesmas.name,
         "activation_link": activation_link,
-        "message": "Perawat user generated. Complete profile after activation.",
+        "email_sent": email_sent,
+        "message": "Akun perawat berhasil dibuat. Password awal adalah NIP. Perawat dapat login setelah aktivasi.",
+    }
+
+
+@router.post(
+    "/login",
+    response_model=PerawatLoginResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Login sebagai Perawat",
+    description="""
+Login endpoint untuk perawat menggunakan email dan password.
+
+## Persyaratan Login
+1. **User harus memiliki role `perawat`**
+2. **Akun harus sudah diverifikasi** (`is_verified = true`)
+3. **Akun harus aktif** (`is_active = true`)
+
+## Password Awal
+Password awal adalah NIP yang digenerate oleh Puskesmas.
+Perawat disarankan untuk mengubah password setelah login pertama.
+
+## Response Sukses
+Mengembalikan JWT token beserta informasi user dan perawat.
+Token berlaku selama 30 hari.
+    """,
+)
+def login_perawat(
+    login_data: PerawatLoginRequest,
+    db: Session = Depends(get_db),
+) -> PerawatLoginResponse:
+    """Login endpoint untuk perawat dengan email dan password."""
+    # Step 1: Authenticate user by email and password
+    user = crud_user.authenticate_by_email(db, email=login_data.email, password=login_data.password)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email atau password salah",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Step 2: Check if user account is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Akun belum diaktivasi. Silakan cek email untuk link aktivasi.",
+        )
+
+    # Step 3: Verify user has perawat role
+    if user.role != "perawat":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun ini bukan akun perawat",
+        )
+
+    # Step 4: Get perawat record linked to this user
+    perawat = _get_perawat_by_user(db, user_id=user.id)
+
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini",
+        )
+
+    # Step 5: Check perawat is_active status
+    if not perawat.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun perawat tidak aktif. Hubungi puskesmas untuk informasi lebih lanjut.",
+        )
+
+    # Step 6: Get puskesmas name
+    puskesmas_name = perawat.puskesmas.name if perawat.puskesmas else None
+
+    # Step 7: Generate access token
+    access_token_expires = timedelta(days=30)
+    access_token = create_access_token(
+        data={"sub": user.phone, "user_id": user.id, "role": user.role},
+        expires_delta=access_token_expires,
+    )
+
+    # Step 8: Build response
+    return PerawatLoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        role=user.role,
+        user=PerawatLoginUserInfo(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+        ),
+        perawat=PerawatLoginPerawatInfo(
+            id=perawat.id,
+            nip=perawat.nip,
+            puskesmas_id=perawat.puskesmas_id,
+            puskesmas_name=puskesmas_name,
+            is_active=perawat.is_active,
+        ),
+    )
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_200_OK,
+    summary="Reset password perawat",
+    description="""
+Reset password untuk perawat yang sudah login.
+
+## Persyaratan
+- Harus sudah login sebagai perawat
+- Harus memasukkan password lama yang benar
+- Password baru minimal 6 karakter
+
+## Flow
+1. Perawat login dengan password lama (NIP)
+2. Akses endpoint ini dengan password lama dan password baru
+3. Password berhasil diubah
+    """,
+)
+def reset_password_perawat(
+    payload: PerawatResetPasswordRequest,
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Reset password untuk perawat yang sudah login."""
+    # Verify current password
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password saat ini salah",
+        )
+    
+    # Update password
+    updated = crud_user.update_password(db, user_id=current_user.id, new_password=payload.new_password)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gagal mengubah password",
+        )
+    
+    return {
+        "message": "Password berhasil diubah",
+        "user_id": current_user.id,
     }
 
 

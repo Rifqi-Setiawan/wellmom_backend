@@ -1,0 +1,48 @@
+# ============================================
+# SQL Commands untuk Update Flow Perawat di VPS
+# ============================================
+# Jalankan command berikut satu per satu di VPS
+
+# 1. Cek struktur tabel perawat saat ini
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "\d perawat"
+
+# 2. Cek apakah ada perawat yang belum punya user_id (jika ada, perlu di-handle)
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "SELECT id, email, nip, user_id FROM perawat WHERE user_id IS NULL;"
+
+# ============================================
+# CATATAN PENTING:
+# ============================================
+# Dengan flow baru:
+# - Puskesmas generate perawat dengan email + NIP saja
+# - Password otomatis = NIP
+# - Perawat login dengan email + password
+# - Perawat dapat reset password sendiri
+#
+# Tidak ada perubahan struktur tabel yang diperlukan
+# karena:
+# - Password disimpan di tabel `users` (password_hash)
+# - Tabel `perawat` sudah memiliki user_id yang link ke users
+# - Kolom email dan nip sudah ada di tabel perawat
+#
+# Flow:
+# 1. POST /api/v1/perawat/generate 
+#    - Request: { "email": "...", "nip": "..." }
+#    - Membuat user dengan password = NIP
+#    - Membuat perawat dengan link ke user dan puskesmas
+#    - Mengirim email aktivasi
+#
+# 2. Perawat klik link aktivasi di email
+#
+# 3. POST /api/v1/perawat/login
+#    - Request: { "email": "...", "password": "..." }
+#    - Password awal = NIP
+#
+# 4. POST /api/v1/perawat/reset-password (setelah login)
+#    - Request: { "current_password": "...", "new_password": "..." }
+# ============================================
+
+# 3. Verifikasi tabel users memiliki kolom yang diperlukan
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "\d users"
+
+# 4. Cek perawat yang sudah ada
+docker exec wellmom_postgres psql -U wellmom -d wellmom_db -c "SELECT p.id, p.email, p.nip, p.user_id, u.email as user_email, u.is_active FROM perawat p LEFT JOIN users u ON p.user_id = u.id;"

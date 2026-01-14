@@ -55,7 +55,7 @@ class PerawatCreate(PerawatBase):
     pass
 
 class PerawatRegisterWithUser(BaseModel):
-    """Schema untuk registrasi perawat dengan user oleh Puskesmas"""
+    """Schema untuk registrasi perawat dengan user oleh Puskesmas (legacy, deprecated)"""
     # User fields
     phone: str = Field(..., pattern=r'^\+?[0-9]{10,15}$')
     email: EmailStr
@@ -85,6 +85,95 @@ class PerawatRegisterWithUser(BaseModel):
             "job_title": "Bidan",
             "license_number": "BID-123456",
             "max_patients": 15
+        }
+    })
+
+
+class PerawatGenerate(BaseModel):
+    """Schema untuk generate akun perawat oleh Puskesmas (simplified).
+    
+    Puskesmas hanya perlu memasukkan email dan NIP.
+    Password otomatis menggunakan NIP.
+    Perawat dapat mengubah password setelah aktivasi.
+    """
+    email: EmailStr = Field(..., description="Email perawat untuk login dan aktivasi")
+    nip: str = Field(..., min_length=5, max_length=50, description="NIP perawat (juga digunakan sebagai password awal)")
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "siti.nurhaliza@puskesmas.go.id",
+            "nip": "198501012015011001"
+        }
+    })
+
+
+class PerawatLoginRequest(BaseModel):
+    """Schema untuk login perawat dengan email dan password."""
+    email: EmailStr = Field(..., description="Email perawat")
+    password: str = Field(..., min_length=1, description="Password perawat")
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "siti.nurhaliza@puskesmas.go.id",
+            "password": "198501012015011001"
+        }
+    })
+
+
+class PerawatLoginResponse(BaseModel):
+    """Response untuk login perawat."""
+    access_token: str
+    token_type: str = "bearer"
+    role: str = "perawat"
+    user: "PerawatLoginUserInfo"
+    perawat: "PerawatLoginPerawatInfo"
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "token_type": "bearer",
+            "role": "perawat",
+            "user": {
+                "id": 10,
+                "email": "siti.nurhaliza@puskesmas.go.id",
+                "full_name": "Siti Nurhaliza"
+            },
+            "perawat": {
+                "id": 1,
+                "nip": "198501012015011001",
+                "puskesmas_id": 1,
+                "puskesmas_name": "Puskesmas Hamparan Pugu",
+                "is_active": True
+            }
+        }
+    })
+
+
+class PerawatLoginUserInfo(BaseModel):
+    """Info user untuk response login perawat."""
+    id: int
+    email: Optional[str] = None
+    full_name: str
+
+
+class PerawatLoginPerawatInfo(BaseModel):
+    """Info perawat untuk response login."""
+    id: int
+    nip: str
+    puskesmas_id: int
+    puskesmas_name: Optional[str] = None
+    is_active: bool
+
+
+class PerawatResetPasswordRequest(BaseModel):
+    """Schema untuk reset password perawat."""
+    current_password: str = Field(..., min_length=1, description="Password saat ini")
+    new_password: str = Field(..., min_length=6, description="Password baru (minimal 6 karakter)")
+    
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "current_password": "198501012015011001",
+            "new_password": "NewSecurePassword123!"
         }
     })
 
