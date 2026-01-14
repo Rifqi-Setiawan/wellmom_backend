@@ -92,6 +92,9 @@ from .chatbot import (
 	QuotaInfoResponse,
 	ChatbotNewConversationRequest,
 )
+from .statistics import (
+	PlatformStatisticsResponse,
+)
 
 __all__ = [
 	# User
@@ -169,4 +172,6 @@ __all__ = [
 	"ChatbotHistoryResponse",
 	"QuotaInfoResponse",
 	"ChatbotNewConversationRequest",
+	# Statistics
+	"PlatformStatisticsResponse",
 ]
