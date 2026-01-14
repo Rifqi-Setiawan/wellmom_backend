@@ -16,13 +16,18 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS (development: allow all)
+# CORS Configuration
+# When allow_credentials=True, cannot use allow_origins=["*"]
+# Must specify explicit origins
+cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
+    expose_headers=["Content-Length", "Content-Type"],
 )
 
 # Include versioned API router

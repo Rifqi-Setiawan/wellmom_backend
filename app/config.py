@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # Frontend base URL
     FRONTEND_BASE_URL: str = "http://103.191.92.29"
     
+    # CORS - Allowed origins (comma-separated)
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://103.191.92.29,https://103.191.92.29"
+    
     # Gemini AI Chatbot
     GEMINI_API_KEY: str = ""
     CHATBOT_USER_DAILY_TOKEN_LIMIT: int = 10000      # Per user per day
