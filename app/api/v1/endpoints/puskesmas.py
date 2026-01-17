@@ -55,7 +55,6 @@ def _build_admin_response(puskesmas: Puskesmas, ibu_count: int, perawat_count: i
     base_payload = PuskesmasResponse.from_orm(puskesmas).model_dump()
     return PuskesmasAdminResponse(
         **base_payload,
-        admin_notes=puskesmas.admin_notes,
         active_ibu_hamil_count=ibu_count,
         active_perawat_count=perawat_count,
     )
