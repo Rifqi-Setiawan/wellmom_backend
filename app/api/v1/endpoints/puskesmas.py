@@ -260,6 +260,20 @@ async def find_nearest_puskesmas(
 
 
 @router.get(
+    "/pending",
+    response_model=List[PuskesmasResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List pending registrations",
+)
+async def list_pending_puskesmas(
+    current_user: User = Depends(require_role("super_admin")),
+    db: Session = Depends(get_db),
+) -> List[Puskesmas]:
+    """Admin-only view of pending registrations."""
+    return crud_puskesmas.get_pending_registrations(db)
+
+
+@router.get(
     "/{puskesmas_id}",
     response_model=PuskesmasResponse,
     status_code=status.HTTP_200_OK,
@@ -277,20 +291,6 @@ async def get_puskesmas(
             detail="Puskesmas not found",
         )
     return puskesmas
-
-
-@router.get(
-    "/pending",
-    response_model=List[PuskesmasResponse],
-    status_code=status.HTTP_200_OK,
-    summary="List pending registrations",
-)
-async def list_pending_puskesmas(
-    current_user: User = Depends(require_role("super_admin")),
-    db: Session = Depends(get_db),
-) -> List[Puskesmas]:
-    """Admin-only view of pending registrations."""
-    return crud_puskesmas.get_pending_registrations(db)
 
 
 @router.post(
