@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import (
     get_current_active_user,
     get_db,
+    require_role,
 )
 from app.core.security import create_access_token, verify_password
 from app.crud import crud_user
@@ -544,6 +545,78 @@ async def login_super_admin(
             full_name=user.full_name,
         ),
     )
+
+
+@router.post(
+    "/logout/super-admin",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Logout Super Admin",
+    description="""
+Logout endpoint untuk super admin.
+
+## Catatan Penting
+
+Karena sistem menggunakan JWT stateless, logout dilakukan dengan:
+1. Memanggil endpoint ini untuk invalidate session di server (opsional)
+2. **Client harus menghapus token dari storage** (localStorage/sessionStorage/cookies)
+3. Client tidak lagi mengirim token di Authorization header
+
+## Response
+
+Mengembalikan konfirmasi logout berhasil.
+""",
+    responses={
+        200: {
+            "description": "Logout berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Logout berhasil",
+                        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage."
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Token tidak valid atau tidak ada",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Bukan super admin",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): super_admin"}
+                }
+            }
+        }
+    },
+)
+async def logout_super_admin(
+    current_user: User = Depends(require_role("super_admin")),
+) -> dict:
+    """
+    Logout endpoint untuk super admin.
+    
+    Endpoint ini memvalidasi bahwa user adalah super admin yang sedang login.
+    Client harus menghapus token dari storage setelah memanggil endpoint ini.
+    
+    Args:
+        current_user: Current authenticated super admin user
+        
+    Returns:
+        dict: Success message confirming logout
+    """
+    return {
+        "message": "Logout berhasil",
+        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+        "user_id": current_user.id,
+        "email": current_user.email,
+    }
 
 
 @router.get(
