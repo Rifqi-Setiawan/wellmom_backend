@@ -13,6 +13,8 @@ from app.api.deps import (
 )
 from app.core.security import create_access_token, verify_password
 from app.crud import crud_user
+from app.crud.ibu_hamil import crud_ibu_hamil
+from app.crud.perawat import crud_perawat
 from app.crud.puskesmas import crud_puskesmas
 from app.models.user import User
 from app.schemas.user import (
@@ -341,6 +343,93 @@ async def login_puskesmas(
 
 
 @router.post(
+    "/logout/puskesmas",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Logout Admin Puskesmas",
+    description="""
+Logout endpoint untuk admin puskesmas.
+
+## Catatan Penting
+
+Karena sistem menggunakan JWT stateless, logout dilakukan dengan:
+1. Memanggil endpoint ini untuk invalidate session di server (opsional)
+2. **Client harus menghapus token dari storage** (localStorage/sessionStorage/cookies)
+3. Client tidak lagi mengirim token di Authorization header
+
+## Response
+
+Mengembalikan konfirmasi logout berhasil beserta informasi puskesmas.
+""",
+    responses={
+        200: {
+            "description": "Logout berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Logout berhasil",
+                        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+                        "user_id": 15,
+                        "email": "admin@puskesmas.go.id",
+                        "puskesmas_id": 1,
+                        "puskesmas_name": "Puskesmas Sungai Penuh"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Token tidak valid atau tidak ada",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Bukan admin puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): puskesmas"}
+                }
+            }
+        }
+    },
+)
+async def logout_puskesmas(
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Logout endpoint untuk admin puskesmas.
+    
+    Endpoint ini memvalidasi bahwa user adalah admin puskesmas yang sedang login.
+    Client harus menghapus token dari storage setelah memanggil endpoint ini.
+    
+    Args:
+        current_user: Current authenticated puskesmas admin user
+        db: Database session
+        
+    Returns:
+        dict: Success message confirming logout with puskesmas info
+    """
+    # Get puskesmas info
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    
+    response_data = {
+        "message": "Logout berhasil",
+        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+        "user_id": current_user.id,
+        "email": current_user.email,
+    }
+    
+    if puskesmas:
+        response_data["puskesmas_id"] = puskesmas.id
+        response_data["puskesmas_name"] = puskesmas.name
+    
+    return response_data
+
+
+@router.post(
     "/register/super-admin",
     response_model=dict,
     status_code=status.HTTP_201_CREATED,
@@ -617,6 +706,180 @@ async def logout_super_admin(
         "user_id": current_user.id,
         "email": current_user.email,
     }
+
+
+@router.post(
+    "/logout/perawat",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Logout Perawat",
+    description="""
+Logout endpoint untuk perawat.
+
+## Catatan Penting
+
+Karena sistem menggunakan JWT stateless, logout dilakukan dengan:
+1. Memanggil endpoint ini untuk invalidate session di server (opsional)
+2. **Client harus menghapus token dari storage** (localStorage/sessionStorage/cookies)
+3. Client tidak lagi mengirim token di Authorization header
+
+## Response
+
+Mengembalikan konfirmasi logout berhasil beserta informasi perawat.
+""",
+    responses={
+        200: {
+            "description": "Logout berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Logout berhasil",
+                        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+                        "user_id": 20,
+                        "email": "perawat@example.com",
+                        "perawat_id": 5,
+                        "nama_lengkap": "Nurse Name"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Token tidak valid atau tidak ada",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Bukan perawat",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): perawat"}
+                }
+            }
+        }
+    },
+)
+async def logout_perawat(
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Logout endpoint untuk perawat.
+    
+    Endpoint ini memvalidasi bahwa user adalah perawat yang sedang login.
+    Client harus menghapus token dari storage setelah memanggil endpoint ini.
+    
+    Args:
+        current_user: Current authenticated perawat user
+        db: Database session
+        
+    Returns:
+        dict: Success message confirming logout with perawat info
+    """
+    # Get perawat info
+    perawat = crud_perawat.get_by_field(db, "user_id", current_user.id)
+    
+    response_data = {
+        "message": "Logout berhasil",
+        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+        "user_id": current_user.id,
+        "email": current_user.email,
+    }
+    
+    if perawat:
+        response_data["perawat_id"] = perawat.id
+        response_data["nama_lengkap"] = perawat.nama_lengkap
+    
+    return response_data
+
+
+@router.post(
+    "/logout/ibu-hamil",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Logout Ibu Hamil",
+    description="""
+Logout endpoint untuk ibu hamil.
+
+## Catatan Penting
+
+Karena sistem menggunakan JWT stateless, logout dilakukan dengan:
+1. Memanggil endpoint ini untuk invalidate session di server (opsional)
+2. **Client harus menghapus token dari storage** (localStorage/sessionStorage/cookies)
+3. Client tidak lagi mengirim token di Authorization header
+
+## Response
+
+Mengembalikan konfirmasi logout berhasil beserta informasi ibu hamil.
+""",
+    responses={
+        200: {
+            "description": "Logout berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Logout berhasil",
+                        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+                        "user_id": 25,
+                        "phone": "+6281234567890",
+                        "ibu_hamil_id": 10,
+                        "nama_lengkap": "Ibu Name"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Unauthorized - Token tidak valid atau tidak ada",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            }
+        },
+        403: {
+            "description": "Forbidden - Bukan ibu hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): ibu_hamil"}
+                }
+            }
+        }
+    },
+)
+async def logout_ibu_hamil(
+    current_user: User = Depends(require_role("ibu_hamil")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Logout endpoint untuk ibu hamil.
+    
+    Endpoint ini memvalidasi bahwa user adalah ibu hamil yang sedang login.
+    Client harus menghapus token dari storage setelah memanggil endpoint ini.
+    
+    Args:
+        current_user: Current authenticated ibu hamil user
+        db: Database session
+        
+    Returns:
+        dict: Success message confirming logout with ibu hamil info
+    """
+    # Get ibu hamil info
+    ibu_hamil = crud_ibu_hamil.get_by_field(db, "user_id", current_user.id)
+    
+    response_data = {
+        "message": "Logout berhasil",
+        "detail": "Token telah di-invalidate. Silakan hapus token dari client storage.",
+        "user_id": current_user.id,
+        "phone": current_user.phone,
+    }
+    
+    if ibu_hamil:
+        response_data["ibu_hamil_id"] = ibu_hamil.id
+        response_data["nama_lengkap"] = ibu_hamil.nama_lengkap
+    
+    return response_data
 
 
 @router.get(
