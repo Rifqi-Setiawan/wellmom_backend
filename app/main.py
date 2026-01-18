@@ -1,10 +1,12 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text  # ✅ ADD THIS
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text  
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db, engine
 from app.api.v1.api import api_router
+from pathlib import Path
 
 # Create FastAPI app
 app = FastAPI(
@@ -29,6 +31,10 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"],
     expose_headers=["Content-Length", "Content-Type"],
 )
+
+upload_dir = Path(settings.UPLOAD_DIR)
+upload_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
 
 # Include versioned API router
 app.include_router(api_router)

@@ -12,9 +12,8 @@ ALLOWED_IMAGES = {".jpg", ".jpeg", ".png"}
 ALLOWED_DOCUMENTS = {".pdf", ".jpg", ".jpeg", ".png"}
 ALLOWED_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 MAX_PHOTO_SIZE_MB = 5
-PROFILE_PHOTOS_DIR = "uploads/profile_photos"
 
-# Upload paths mapping
+# Upload paths mapping (relative to UPLOAD_DIR)
 UPLOAD_PATHS = {
     # Documents
     "puskesmas_sk": "documents/puskesmas/sk_pendirian",
@@ -25,7 +24,11 @@ UPLOAD_PATHS = {
     "puskesmas_photo": "photos/puskesmas",
     "perawat_profile": "photos/profiles/perawat",
     "ibu_hamil_profile": "photos/profiles/ibu_hamil",
+    
+    # Profile photos (consistent path)
+    "profile_photos": "photos/profiles",
 }
+
 
 def validate_file(upload_file: UploadFile, file_type: str) -> None:
     """Validate file type and size"""
@@ -54,8 +57,13 @@ def validate_file(upload_file: UploadFile, file_type: str) -> None:
                 detail=f"Invalid image type. Allowed: {', '.join(ALLOWED_IMAGES)}"
             )
 
+
 def save_upload_file(upload_file: UploadFile, upload_type: str) -> str:
-    """Save uploaded file to VPS local storage"""
+    """Save uploaded file to VPS local storage
+    
+    Returns:
+        str: Relative URL path (e.g., /uploads/documents/puskesmas/sk_pendirian/uuid.pdf)
+    """
     if upload_type not in UPLOAD_PATHS:
         raise HTTPException(status_code=400, detail=f"Invalid upload type: {upload_type}")
     
@@ -75,15 +83,22 @@ def save_upload_file(upload_file: UploadFile, upload_type: str) -> str:
         content = upload_file.file.read()
         f.write(content)
     
+    # Return relative URL path
     return f"/uploads/{subfolder}/{unique_filename}"
+
 
 def delete_file(file_path: str) -> bool:
     """Delete file from VPS storage"""
     try:
         if not file_path:
             return False
-            
-        full_path = Path(settings.UPLOAD_DIR).parent / file_path.lstrip("/")
+        
+        # Handle both /uploads/... and uploads/... paths
+        clean_path = file_path.lstrip("/")
+        if clean_path.startswith("uploads/"):
+            clean_path = clean_path[8:]  # Remove "uploads/"
+        
+        full_path = Path(settings.UPLOAD_DIR) / clean_path
         
         if full_path.exists():
             full_path.unlink()
@@ -93,23 +108,42 @@ def delete_file(file_path: str) -> bool:
         print(f"Error deleting file {file_path}: {e}")
         return False
 
-def get_file_url(file_path: str) -> str:
-    """Get public URL for file"""
+
+def get_file_url(file_path: str) -> Optional[str]:
+    """Get public URL for file
+    
+    Args:
+        file_path: Relative path like /uploads/documents/... or just the stored path
+        
+    Returns:
+        Full URL like http://103.191.92.29/uploads/documents/...
+    """
     if not file_path:
         return None
     
-    if not file_path.startswith("/"):
-        file_path = f"/{file_path}"
+    # Ensure path starts with /uploads
+    if not file_path.startswith("/uploads"):
+        if file_path.startswith("uploads/"):
+            file_path = f"/{file_path}"
+        elif file_path.startswith("/"):
+            file_path = f"/uploads{file_path}"
+        else:
+            file_path = f"/uploads/{file_path}"
     
-    return f"{settings.FRONTEND_BASE_URL}{file_path}"
+    return f"{settings.FRONTEND_BASE_URL.rstrip('/')}{file_path}"
 
 
 # ============================================
 # PROFILE PHOTO FUNCTIONS
 # ============================================
-def ensure_upload_dir() -> None:
-    """Ensure upload directory exists."""
-    Path(PROFILE_PHOTOS_DIR).mkdir(parents=True, exist_ok=True)
+def ensure_upload_dir(subdir: str = "") -> Path:
+    """Ensure upload directory exists and return the path."""
+    if subdir:
+        dir_path = Path(settings.UPLOAD_DIR) / subdir
+    else:
+        dir_path = Path(settings.UPLOAD_DIR)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return dir_path
 
 
 def validate_photo_file(file: UploadFile) -> Tuple[bool, Optional[str]]:
@@ -117,7 +151,6 @@ def validate_photo_file(file: UploadFile) -> Tuple[bool, Optional[str]]:
     
     Returns: (is_valid, error_message)
     """
-    # Check file extension
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_PHOTO_EXTENSIONS:
         return False, f"File type not allowed. Allowed: {', '.join(ALLOWED_PHOTO_EXTENSIONS)}"
@@ -134,24 +167,23 @@ async def save_profile_photo(file: UploadFile, entity_type: str, entity_id: int)
         entity_id: ID of the perawat or ibu_hamil
     
     Returns:
-        Relative file path or None if save failed
+        Relative URL path (e.g., /uploads/photos/profiles/perawat/perawat_1_20250118_123456.jpg)
     """
     # Validate file
     is_valid, error = validate_photo_file(file)
     if not is_valid:
         raise ValueError(error)
     
-    # Create directory if not exists
-    ensure_upload_dir()
+    # Create directory
+    subdir = f"photos/profiles/{entity_type}"
+    ensure_upload_dir(subdir)
     
     # Generate filename: type_id_timestamp.ext
     file_ext = Path(file.filename).suffix.lower()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{entity_type}_{entity_id}_{timestamp}{file_ext}"
-    filepath = os.path.join(PROFILE_PHOTOS_DIR, entity_type, filename)
     
-    # Ensure subdirectory exists
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    filepath = Path(settings.UPLOAD_DIR) / subdir / filename
     
     # Save file
     try:
@@ -165,7 +197,7 @@ async def save_profile_photo(file: UploadFile, entity_type: str, entity_id: int)
         with open(filepath, "wb") as f:
             f.write(contents)
         
-        # Return relative path for storage
-        return filepath.replace("\\", "/")
+        # Return relative URL path
+        return f"/uploads/{subdir}/{filename}"
     except Exception as e:
         raise ValueError(f"Failed to save file: {str(e)}")

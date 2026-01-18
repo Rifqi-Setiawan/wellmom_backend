@@ -2,7 +2,10 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.utils.file_handler import save_upload_file, get_file_url, delete_file
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/upload",  # ← TAMBAHKAN PREFIX
+    tags=["Upload"]    # ← TAMBAHKAN TAG
+)
 
 @router.post("/puskesmas/sk-pendirian")
 async def upload_sk_pendirian(file: UploadFile = File(...)):
@@ -15,6 +18,7 @@ async def upload_sk_pendirian(file: UploadFile = File(...)):
         "file_url": file_url,
         "message": "SK Pendirian uploaded successfully"
     }
+
 
 @router.post("/puskesmas/npwp")
 async def upload_npwp(file: UploadFile = File(...)):
