@@ -5,7 +5,7 @@ from typing import Optional
 
 from app.api.deps import get_current_active_user, get_db, require_role
 from app.utils.file_handler import save_upload_file, get_file_url, delete_file
-from app.crud import crud_puskesmas
+from app.crud import crud_puskesmas, crud_perawat, crud_ibu_hamil
 from app.models.user import User
 
 router = APIRouter(
@@ -407,6 +407,10 @@ async def upload_str(file: UploadFile = File(...)):
     }
 
 
+# ===========================================
+# PERAWAT PROFILE PHOTOS
+# ===========================================
+
 @router.post("/perawat/profile-photo")
 async def upload_perawat_profile(file: UploadFile = File(...)):
     """Upload Foto Profil Perawat (JPG/PNG)"""
@@ -428,6 +432,96 @@ async def upload_perawat_profile(file: UploadFile = File(...)):
         "file_url": file_url,
         "message": "Profile photo uploaded successfully"
     }
+
+
+@router.put("/perawat/{perawat_id}/profile-photo")
+async def update_perawat_photo(
+    perawat_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update Foto Profil Perawat.
+    
+    Hanya perawat sendiri atau super_admin yang dapat update.
+    File lama akan dihapus dan diganti dengan file baru.
+    
+    - **perawat_id**: ID perawat
+    - **file**: File JPG/PNG foto baru (max 2MB)
+    """
+    # Get perawat
+    perawat = crud_perawat.get(db, id=perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tidak ditemukan"
+        )
+    
+    # Authorization: hanya perawat sendiri atau super_admin
+    if current_user.role == "perawat" and perawat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tidak memiliki akses untuk update foto perawat ini"
+        )
+    elif current_user.role not in ["perawat", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya perawat atau super admin yang dapat update foto"
+        )
+    
+    # Validate file type
+    allowed_extensions = ['.jpg', '.jpeg', '.png']
+    file_ext = file.filename.lower().split('.')[-1]
+    
+    if f'.{file_ext}' not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Foto harus berformat JPG atau PNG"
+        )
+    
+    # Delete old file if exists
+    if perawat.profile_photo_url:
+        delete_file(perawat.profile_photo_url)
+    
+    # Upload new file
+    file_path = save_upload_file(file, "perawat_profile")
+    file_url = get_file_url(file_path)
+    
+    # Update database
+    perawat.profile_photo_url = file_path
+    db.add(perawat)
+    db.commit()
+    db.refresh(perawat)
+    
+    return {
+        "success": True,
+        "perawat_id": perawat_id,
+        "file_path": file_path,
+        "file_url": file_url,
+        "message": "Profile photo updated successfully"
+    }
+
+
+@router.delete("/perawat/{perawat_id}/profile-photo")
+async def delete_perawat_photo(
+    perawat_id: int,
+    current_user: User = Depends(require_role("super_admin")),
+    db: Session = Depends(get_db)
+):
+    """
+    Hapus Foto Profil Perawat (Super Admin only).
+    """
+    perawat = crud_perawat.get(db, id=perawat_id)
+    if not perawat:
+        raise HTTPException(status_code=404, detail="Perawat tidak ditemukan")
+    
+    if perawat.profile_photo_url:
+        delete_file(perawat.profile_photo_url)
+        perawat.profile_photo_url = None
+        db.commit()
+    
+    return {"success": True, "message": "Profile photo deleted"}
 
 
 # ===========================================
@@ -457,18 +551,91 @@ async def upload_ibu_hamil_profile(file: UploadFile = File(...)):
     }
 
 
-# ===========================================
-# GENERIC DELETE
-# ===========================================
-
-@router.delete("/file")
-async def delete_uploaded_file(
-    file_path: str,
-    current_user: User = Depends(require_role("super_admin"))
+@router.put("/ibu-hamil/{ibu_hamil_id}/profile-photo")
+async def update_ibu_hamil_photo(
+    ibu_hamil_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    """Delete uploaded file (Super Admin only)"""
-    success = delete_file(file_path)
-    if success:
-        return {"success": True, "message": "File deleted successfully"}
-    else:
-        raise HTTPException(status_code=404, detail="File not found")
+    """
+    Update Foto Profil Ibu Hamil.
+    
+    Hanya ibu hamil sendiri atau super_admin yang dapat update.
+    File lama akan dihapus dan diganti dengan file baru.
+    
+    - **ibu_hamil_id**: ID ibu hamil
+    - **file**: File JPG/PNG foto baru (max 2MB)
+    """
+    # Get ibu hamil
+    ibu_hamil = crud_ibu_hamil.get(db, id=ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu hamil tidak ditemukan"
+        )
+    
+    # Authorization: hanya ibu hamil sendiri atau super_admin
+    if current_user.role == "ibu_hamil" and ibu_hamil.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tidak memiliki akses untuk update foto ibu hamil ini"
+        )
+    elif current_user.role not in ["ibu_hamil", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil atau super admin yang dapat update foto"
+        )
+    
+    # Validate file type
+    allowed_extensions = ['.jpg', '.jpeg', '.png']
+    file_ext = file.filename.lower().split('.')[-1]
+    
+    if f'.{file_ext}' not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Foto harus berformat JPG atau PNG"
+        )
+    
+    # Delete old file if exists
+    if ibu_hamil.profile_photo_url:
+        delete_file(ibu_hamil.profile_photo_url)
+    
+    # Upload new file
+    file_path = save_upload_file(file, "ibu_hamil_profile")
+    file_url = get_file_url(file_path)
+    
+    # Update database
+    ibu_hamil.profile_photo_url = file_path
+    db.add(ibu_hamil)
+    db.commit()
+    db.refresh(ibu_hamil)
+    
+    return {
+        "success": True,
+        "ibu_hamil_id": ibu_hamil_id,
+        "file_path": file_path,
+        "file_url": file_url,
+        "message": "Profile photo updated successfully"
+    }
+
+
+@router.delete("/ibu-hamil/{ibu_hamil_id}/profile-photo")
+async def delete_ibu_hamil_photo(
+    ibu_hamil_id: int,
+    current_user: User = Depends(require_role("super_admin")),
+    db: Session = Depends(get_db)
+):
+    """
+    Hapus Foto Profil Ibu Hamil (Super Admin only).
+    """
+    ibu_hamil = crud_ibu_hamil.get(db, id=ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(status_code=404, detail="Ibu hamil tidak ditemukan")
+    
+    if ibu_hamil.profile_photo_url:
+        delete_file(ibu_hamil.profile_photo_url)
+        ibu_hamil.profile_photo_url = None
+        db.commit()
+    
+    return {"success": True, "message": "Profile photo deleted"}
