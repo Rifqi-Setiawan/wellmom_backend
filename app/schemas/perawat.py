@@ -43,7 +43,7 @@ class PerawatBase(BaseModel):
             "nomor_hp": "+6281234567890",
             "nip": "198501012015011001",
             "is_active": True,
-            "profile_photo_url": "/photos/perawat/1.jpg",
+            "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1_20250118_123456.jpg",
         }
     })
 
@@ -238,7 +238,7 @@ class PerawatResponse(BaseModel):
                 "nomor_hp": "+6281234567890",
                 "nip": "198501012015011001",
                 "is_active": True,
-                "profile_photo_url": "/photos/perawat/1.jpg",
+                "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1_20250118_123456.jpg",
                 "jumlah_ibu_hamil": 5,
                 "created_at": "2025-01-01T10:00:00Z",
                 "updated_at": "2025-01-02T11:00:00Z",

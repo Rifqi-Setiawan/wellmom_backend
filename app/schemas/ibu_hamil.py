@@ -405,7 +405,7 @@ class IbuHamilResponse(BaseModel):
             "nama_lengkap": "Siti Aminah",
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
-            "profile_photo_url": "/photos/ibu_hamil/1.jpg",
+            "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_hamil_1_20250118_123456.jpg",
             "puskesmas_id": 1,
             "perawat_id": 1,
             "location": [101.3912, -2.0645],
