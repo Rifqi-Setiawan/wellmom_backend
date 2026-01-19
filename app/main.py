@@ -23,6 +23,15 @@ app = FastAPI(
 # Must specify explicit origins
 cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 
+# Fallback to common local origins if env accidentally empty to avoid CORS block during dev
+if not cors_origins:
+    cors_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
