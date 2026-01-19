@@ -91,10 +91,10 @@ async def register_puskesmas(
             detail="Phone already registered",
         )
 
-    # Create associated user (temporary password uses kepala_nip)
+    # Create associated user with password from registration input
     user_data = UserCreate(
         phone=puskesmas_in.phone,
-        password=puskesmas_in.kepala_nip,
+        password=puskesmas_in.password,
         full_name=puskesmas_in.kepala_name,
         role="puskesmas",
         email=puskesmas_in.email,

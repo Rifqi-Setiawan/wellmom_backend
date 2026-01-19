@@ -69,8 +69,16 @@ class PuskesmasBase(BaseModel):
 
 
 class PuskesmasCreate(PuskesmasBase):
+    password: str = Field(..., min_length=8, description="Password untuk akun admin puskesmas (minimal 8 karakter)")
     registration_status: str = Field(default="draft", description="draft or pending_approval")
     admin_user_id: Optional[int] = None  # injected after user creation
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password minimal 8 karakter")
+        return v
 
     @field_validator("registration_status")
     @classmethod
@@ -82,6 +90,7 @@ class PuskesmasCreate(PuskesmasBase):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             **PuskesmasBase.model_config.get("json_schema_extra", {}).get("example", {}),
+            "password": "SecurePassword123!",
             "registration_status": "draft",
         }
     })
