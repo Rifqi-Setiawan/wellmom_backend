@@ -21,6 +21,8 @@ def _validate_phone(value: str) -> str:
 def _validate_nip(value: str) -> str:
     if not value or len(value) < 5:
         raise ValueError("NIP is required and must be at least 5 characters")
+    if len(value) > 18:
+        raise ValueError("NIP must be at most 18 characters")
     return value
 
 
