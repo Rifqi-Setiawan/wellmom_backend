@@ -266,5 +266,35 @@ class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
         stmt = select(Puskesmas).where(Puskesmas.admin_user_id == admin_user_id).limit(1)
         return db.scalars(stmt).first()
 
+    def update_with_location(
+        self, db: Session, *, db_obj: Puskesmas, obj_in: PuskesmasUpdate
+    ) -> Puskesmas:
+        """Update Puskesmas including PostGIS location if latitude/longitude changed."""
+        update_data = obj_in.model_dump(exclude_unset=True)
+
+        # Handle location update if lat/long provided
+        lat = update_data.get("latitude")
+        lon = update_data.get("longitude")
+        if lat is not None and lon is not None:
+            location_wkt = f"POINT({lon} {lat})"
+            db_obj.location = ST_GeogFromText(location_wkt)
+
+        # Update other fields
+        for field, value in update_data.items():
+            if hasattr(db_obj, field) and field not in ("latitude", "longitude"):
+                setattr(db_obj, field, value)
+            elif field in ("latitude", "longitude"):
+                # Also set the raw lat/lon fields
+                setattr(db_obj, field, value)
+
+        try:
+            db.add(db_obj)
+            db.commit()
+            db.refresh(db_obj)
+        except Exception:
+            db.rollback()
+            raise
+        return db_obj
+
 # Singleton instance
 crud_puskesmas = CRUDPuskesmas(Puskesmas)

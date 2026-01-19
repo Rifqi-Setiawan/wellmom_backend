@@ -3,7 +3,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from app.api.deps import get_current_active_user, get_db, require_role
+from app.api.deps import get_current_active_user, get_db, get_optional_current_user, require_role
 from app.utils.file_handler import save_upload_file, get_file_url, delete_file
 from app.crud import crud_puskesmas, crud_perawat, crud_ibu_hamil
 from app.models.user import User
@@ -113,15 +113,18 @@ async def upload_puskesmas_photo(file: UploadFile = File(...)):
 async def update_sk_pendirian(
     puskesmas_id: int,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Update SK Pendirian Puskesmas.
-    
-    Hanya admin puskesmas yang bersangkutan atau super_admin yang dapat update.
+
+    **Akses:**
+    - Puskesmas draft: tanpa autentikasi (untuk registrasi Step 2)
+    - Puskesmas non-draft: hanya admin puskesmas atau super_admin
+
     File lama akan dihapus dan diganti dengan file baru.
-    
+
     - **puskesmas_id**: ID puskesmas
     - **file**: File PDF SK Pendirian baru (max 2MB)
     """
@@ -132,40 +135,46 @@ async def update_sk_pendirian(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Puskesmas tidak ditemukan"
         )
-    
-    # Authorization: hanya admin puskesmas atau super_admin
-    if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tidak memiliki akses untuk update dokumen puskesmas ini"
-        )
-    elif current_user.role not in ["puskesmas", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hanya admin puskesmas atau super admin yang dapat update dokumen"
-        )
-    
+
+    # Authorization: draft puskesmas dapat diakses tanpa auth (registration flow)
+    if puskesmas.registration_status != "draft":
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tidak memiliki akses untuk update dokumen puskesmas ini"
+            )
+        elif current_user.role not in ["puskesmas", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hanya admin puskesmas atau super admin yang dapat update dokumen"
+            )
+
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SK Pendirian harus berformat PDF"
         )
-    
+
     # Delete old file if exists
     if puskesmas.sk_document_url:
         delete_file(puskesmas.sk_document_url)
-    
+
     # Upload new file
     file_path = save_upload_file(file, "puskesmas_sk")
     file_url = get_file_url(file_path)
-    
+
     # Update database
     puskesmas.sk_document_url = file_path
     db.add(puskesmas)
     db.commit()
     db.refresh(puskesmas)
-    
+
     return {
         "success": True,
         "puskesmas_id": puskesmas_id,
@@ -179,15 +188,18 @@ async def update_sk_pendirian(
 async def update_npwp(
     puskesmas_id: int,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Update Scan NPWP Puskesmas.
-    
-    Hanya admin puskesmas yang bersangkutan atau super_admin yang dapat update.
+
+    **Akses:**
+    - Puskesmas draft: tanpa autentikasi (untuk registrasi Step 2)
+    - Puskesmas non-draft: hanya admin puskesmas atau super_admin
+
     File lama akan dihapus dan diganti dengan file baru.
-    
+
     - **puskesmas_id**: ID puskesmas
     - **file**: File PDF atau JPG NPWP baru (max 2MB)
     """
@@ -198,49 +210,55 @@ async def update_npwp(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Puskesmas tidak ditemukan"
         )
-    
-    # Authorization
-    if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tidak memiliki akses untuk update dokumen puskesmas ini"
-        )
-    elif current_user.role not in ["puskesmas", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hanya admin puskesmas atau super admin yang dapat update dokumen"
-        )
-    
+
+    # Authorization: draft puskesmas dapat diakses tanpa auth (registration flow)
+    if puskesmas.registration_status != "draft":
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tidak memiliki akses untuk update dokumen puskesmas ini"
+            )
+        elif current_user.role not in ["puskesmas", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hanya admin puskesmas atau super admin yang dapat update dokumen"
+            )
+
     # Validate file type
     allowed_extensions = ['.pdf', '.jpg', '.jpeg']
     file_ext = file.filename.lower().split('.')[-1]
-    
+
     if f'.{file_ext}' not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"NPWP harus berformat PDF atau JPG"
+            detail="NPWP harus berformat PDF atau JPG"
         )
-    
+
     # Delete old file if exists
     if puskesmas.npwp_document_url:
         delete_file(puskesmas.npwp_document_url)
-    
+
     # Upload new file
     file_path = save_upload_file(file, "puskesmas_npwp")
     file_url = get_file_url(file_path)
-    
+
     # Update database
     puskesmas.npwp_document_url = file_path
     db.add(puskesmas)
     db.commit()
     db.refresh(puskesmas)
-    
+
     return {
         "success": True,
         "puskesmas_id": puskesmas_id,
         "file_path": file_path,
         "file_url": file_url,
-        "message": "NPWP updated successfully"
+        "message": "NPWP document updated successfully"
     }
 
 
@@ -248,15 +266,18 @@ async def update_npwp(
 async def update_puskesmas_photo(
     puskesmas_id: int,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Update Foto Gedung Puskesmas.
-    
-    Hanya admin puskesmas yang bersangkutan atau super_admin yang dapat update.
+
+    **Akses:**
+    - Puskesmas draft: tanpa autentikasi (untuk registrasi Step 2)
+    - Puskesmas non-draft: hanya admin puskesmas atau super_admin
+
     File lama akan dihapus dan diganti dengan file baru.
-    
+
     - **puskesmas_id**: ID puskesmas
     - **file**: File JPG/PNG foto gedung baru (max 2MB)
     """
@@ -267,49 +288,55 @@ async def update_puskesmas_photo(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Puskesmas tidak ditemukan"
         )
-    
-    # Authorization
-    if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tidak memiliki akses untuk update foto puskesmas ini"
-        )
-    elif current_user.role not in ["puskesmas", "super_admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hanya admin puskesmas atau super admin yang dapat update foto"
-        )
-    
+
+    # Authorization: draft puskesmas dapat diakses tanpa auth (registration flow)
+    if puskesmas.registration_status != "draft":
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tidak memiliki akses untuk update foto puskesmas ini"
+            )
+        elif current_user.role not in ["puskesmas", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hanya admin puskesmas atau super admin yang dapat update foto"
+            )
+
     # Validate file type
     allowed_extensions = ['.jpg', '.jpeg', '.png']
     file_ext = file.filename.lower().split('.')[-1]
-    
+
     if f'.{file_ext}' not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Foto harus berformat JPG atau PNG"
+            detail="Foto harus berformat JPG atau PNG"
         )
-    
+
     # Delete old file if exists
     if puskesmas.building_photo_url:
         delete_file(puskesmas.building_photo_url)
-    
+
     # Upload new file
     file_path = save_upload_file(file, "puskesmas_photo")
     file_url = get_file_url(file_path)
-    
+
     # Update database
     puskesmas.building_photo_url = file_path
     db.add(puskesmas)
     db.commit()
     db.refresh(puskesmas)
-    
+
     return {
         "success": True,
         "puskesmas_id": puskesmas_id,
         "file_path": file_path,
         "file_url": file_url,
-        "message": "Foto gedung updated successfully"
+        "message": "Building photo updated successfully"
     }
 
 

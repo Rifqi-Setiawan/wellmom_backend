@@ -32,11 +32,11 @@ class PuskesmasBase(BaseModel):
     kepala_name: str = Field(..., min_length=3, max_length=255)
     kepala_nip: str
     npwp: Optional[str] = None
-    sk_document_url: str  # Upload SK Pendirian (PDF)
+    sk_document_url: Optional[str] = None  # Upload SK Pendirian (PDF) - opsional untuk draft
     npwp_document_url: Optional[str] = None  # Upload Scan NPWP (PDF/JPG/PNG)
-    building_photo_url: str  # Upload Foto Gedung (JPG/PNG)
-    latitude: float
-    longitude: float
+    building_photo_url: Optional[str] = None  # Upload Foto Gedung (JPG/PNG) - opsional untuk draft
+    latitude: Optional[float] = None  # Opsional untuk draft
+    longitude: Optional[float] = None  # Opsional untuk draft
     data_truth_confirmed: bool = False
 
     @field_validator("phone")
@@ -82,7 +82,22 @@ class PuskesmasCreate(PuskesmasBase):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             **PuskesmasBase.model_config.get("json_schema_extra", {}).get("example", {}),
-            "registration_status": "pending_approval",
+            "registration_status": "draft",
+        }
+    })
+
+
+class PuskesmasSubmitForApproval(BaseModel):
+    """Schema untuk submit draft ke pending_approval (Step 3)."""
+    latitude: float = Field(..., description="Koordinat latitude dari map")
+    longitude: float = Field(..., description="Koordinat longitude dari map")
+    data_truth_confirmed: bool = Field(..., description="Konfirmasi kebenaran data")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "latitude": -2.0645,
+            "longitude": 101.3912,
+            "data_truth_confirmed": True,
         }
     })
 

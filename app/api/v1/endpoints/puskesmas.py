@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, get_db, require_role
+from app.api.deps import get_current_active_user, get_db, get_optional_current_user, require_role
 from app.crud import crud_ibu_hamil, crud_notification, crud_perawat, crud_puskesmas, crud_user
 from app.models.ibu_hamil import IbuHamil
 from app.models.perawat import Perawat
@@ -15,7 +15,13 @@ from app.models.puskesmas import Puskesmas
 from app.models.user import User
 from app.schemas.ibu_hamil import IbuHamilResponse
 from app.schemas.notification import NotificationCreate
-from app.schemas.puskesmas import PuskesmasAdminResponse, PuskesmasCreate, PuskesmasResponse
+from app.schemas.puskesmas import (
+    PuskesmasAdminResponse,
+    PuskesmasCreate,
+    PuskesmasResponse,
+    PuskesmasSubmitForApproval,
+    PuskesmasUpdate,
+)
 from app.schemas.user import UserCreate
 
 router = APIRouter(
@@ -291,6 +297,162 @@ async def get_puskesmas(
             detail="Puskesmas not found",
         )
     return puskesmas
+
+
+@router.put(
+    "/{puskesmas_id}",
+    response_model=PuskesmasResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update puskesmas data (Step 3: Submit for approval)",
+    description="""
+Update data puskesmas. Digunakan untuk:
+1. Update lokasi (latitude, longitude) dari map picker
+2. Submit registrasi dari draft ke pending_approval
+
+**Flow Registrasi Multi-Step:**
+- Step 1: POST /puskesmas/register (buat draft)
+- Step 2: PUT /upload/puskesmas/{id}/sk-pendirian, /photo, /npwp (upload dokumen)
+- Step 3: PUT /puskesmas/{id} (set lokasi & submit untuk approval)
+
+**Validasi saat submit pending_approval:**
+- SK Pendirian (sk_document_url) harus sudah diupload
+- Foto Gedung (building_photo_url) harus sudah diupload
+- data_truth_confirmed harus true
+- latitude dan longitude harus diisi
+
+**Akses:**
+- Puskesmas yang berstatus draft: tanpa autentikasi (untuk registrasi)
+- Puskesmas yang sudah approved: hanya admin puskesmas atau super_admin
+""",
+    responses={
+        200: {
+            "description": "Puskesmas berhasil diupdate",
+        },
+        400: {
+            "description": "Validasi gagal",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "doc_missing": {
+                            "summary": "Dokumen wajib belum diupload",
+                            "value": {"detail": "SK Pendirian wajib diupload sebelum submit"}
+                        },
+                        "photo_missing": {
+                            "summary": "Foto gedung belum diupload",
+                            "value": {"detail": "Foto Gedung wajib diupload sebelum submit"}
+                        },
+                        "location_missing": {
+                            "summary": "Lokasi belum diset",
+                            "value": {"detail": "Latitude dan Longitude wajib diisi sebelum submit"}
+                        },
+                        "not_confirmed": {
+                            "summary": "Belum konfirmasi kebenaran data",
+                            "value": {"detail": "Anda harus mengkonfirmasi kebenaran data sebelum submit"}
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized to update this puskesmas"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas not found"}
+                }
+            }
+        }
+    }
+)
+async def update_puskesmas(
+    puskesmas_id: int,
+    puskesmas_in: PuskesmasUpdate,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
+) -> Puskesmas:
+    """
+    Update puskesmas data.
+
+    For draft puskesmas during registration: no auth required.
+    For approved puskesmas: only admin puskesmas or super_admin.
+
+    Validates required documents when submitting for pending_approval.
+    """
+    puskesmas = crud_puskesmas.get(db, id=puskesmas_id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas not found",
+        )
+
+    # Authorization check
+    # Draft puskesmas: no auth required (registration flow)
+    # Otherwise: need to be admin puskesmas or super_admin
+    if puskesmas.registration_status != "draft":
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        if current_user.role == "puskesmas" and puskesmas.admin_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this puskesmas",
+            )
+        elif current_user.role not in ["puskesmas", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to update this puskesmas",
+            )
+
+    # Validate when submitting for pending_approval
+    update_data = puskesmas_in.model_dump(exclude_unset=True)
+    target_status = update_data.get("registration_status")
+
+    if target_status == "pending_approval":
+        # Check required documents
+        sk_doc = update_data.get("sk_document_url") or puskesmas.sk_document_url
+        if not sk_doc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="SK Pendirian wajib diupload sebelum submit",
+            )
+
+        building_photo = update_data.get("building_photo_url") or puskesmas.building_photo_url
+        if not building_photo:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Foto Gedung wajib diupload sebelum submit",
+            )
+
+        # Check location
+        lat = update_data.get("latitude") if "latitude" in update_data else puskesmas.latitude
+        lon = update_data.get("longitude") if "longitude" in update_data else puskesmas.longitude
+        if lat is None or lon is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Latitude dan Longitude wajib diisi sebelum submit",
+            )
+
+        # Check data_truth_confirmed
+        confirmed = update_data.get("data_truth_confirmed") if "data_truth_confirmed" in update_data else puskesmas.data_truth_confirmed
+        if not confirmed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Anda harus mengkonfirmasi kebenaran data sebelum submit",
+            )
+
+    # Update puskesmas with location handling
+    updated = crud_puskesmas.update_with_location(db, db_obj=puskesmas, obj_in=puskesmas_in)
+
+    return updated
 
 
 @router.post(

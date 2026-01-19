@@ -26,6 +26,7 @@ class User(Base):
     is_active = Column(Boolean, default=True, index=True)
     is_verified = Column(Boolean, default=False)
     verification_token = Column(String(255))
+    verification_token_expires_at = Column(TIMESTAMP, nullable=True)
     
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now())

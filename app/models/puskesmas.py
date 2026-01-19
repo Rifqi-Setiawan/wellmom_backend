@@ -25,9 +25,9 @@ class Puskesmas(Base):
     
     # Legal & Tax
     npwp = Column(String(20), nullable=True)
-    sk_document_url = Column(String(500), nullable=False)  # Upload SK Pendirian (PDF)
+    sk_document_url = Column(String(500), nullable=True)  # Upload SK Pendirian (PDF) - nullable for draft
     npwp_document_url = Column(String(500), nullable=True)  # Upload Scan NPWP (PDF/JPG/PNG)
-    building_photo_url = Column(String(500), nullable=False)  # Upload Foto Gedung (JPG/PNG)
+    building_photo_url = Column(String(500), nullable=True)  # Upload Foto Gedung (JPG/PNG) - nullable for draft
 
     # Geolocation
     latitude = Column(Float, nullable=True)
