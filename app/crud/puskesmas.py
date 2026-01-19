@@ -19,7 +19,8 @@ from app.schemas.puskesmas import PuskesmasCreate, PuskesmasUpdate
 class CRUDPuskesmas(CRUDBase[Puskesmas, PuskesmasCreate, PuskesmasUpdate]):
     def create_with_location(self, db: Session, *, puskesmas_in: PuskesmasCreate) -> Puskesmas:
         """Create Puskesmas and fill PostGIS location from latitude/longitude."""
-        puskesmas_data = puskesmas_in.model_dump(exclude_unset=True)
+        # Exclude 'password' karena disimpan di tabel users, bukan puskesmas
+        puskesmas_data = puskesmas_in.model_dump(exclude_unset=True, exclude={"password"})
 
         lat = puskesmas_data.get("latitude")
         lon = puskesmas_data.get("longitude")
