@@ -32,6 +32,18 @@ env/
 .env.local
 .env.*.local
 
+# Firebase credentials (SENSITIVE - NEVER COMMIT!)
+firebase-key.json
+*-firebase-*.json
+serviceAccount*.json
+
+# Docker configs with secrets (SENSITIVE)
+docker-compose.yml
+docker-compose.*.yml
+
+# Mosquitto config (contains credentials)
+mosquitto.conf
+
 # IDE
 .vscode/
 .idea/
