@@ -210,6 +210,53 @@ class PuskesmasAdminResponse(PuskesmasResponse):
     })
 
 
+class PuskesmasProfileUpdate(BaseModel):
+    """Schema untuk update profile puskesmas oleh admin puskesmas sendiri.
+    
+    Hanya field yang boleh diubah oleh admin puskesmas:
+    - Informasi dasar: nama, alamat, email, phone
+    - Informasi kepala: kepala_name, kepala_nip
+    - Dokumen: sk_document_url, npwp_document_url, building_photo_url, npwp
+    - Lokasi: latitude, longitude
+    
+    Field yang TIDAK boleh diubah oleh admin puskesmas:
+    - registration_status (hanya super_admin)
+    - is_active (hanya super_admin)
+    - admin_user_id, approved_by_admin_id, dll
+    """
+    name: Optional[str] = Field(None, min_length=3, max_length=255)
+    address: Optional[str] = Field(None, min_length=5)
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    kepala_name: Optional[str] = Field(None, min_length=3, max_length=255)
+    kepala_nip: Optional[str] = None
+    npwp: Optional[str] = None
+    sk_document_url: Optional[str] = None
+    npwp_document_url: Optional[str] = None
+    building_photo_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_phone(v) if v is not None else v
+
+    @field_validator("kepala_nip")
+    @classmethod
+    def validate_nip(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_nip(v) if v is not None else v
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "name": "Puskesmas Sungai Penuh",
+            "address": "Jl. Merdeka No. 1, Sungai Penuh, Jambi",
+            "phone": "+6281234567890",
+            "kepala_name": "dr. Rina Wijaya",
+        }
+    })
+
+
 class PuskesmasApproval(BaseModel):
     registration_status: str
     rejection_reason: Optional[str] = None

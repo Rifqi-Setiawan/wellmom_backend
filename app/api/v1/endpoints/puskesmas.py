@@ -1,5 +1,6 @@
 """Puskesmas endpoints."""
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, get_optional_current_user, require_role
 from app.crud import crud_ibu_hamil, crud_notification, crud_perawat, crud_puskesmas, crud_user
+from app.models.health_record import HealthRecord
 from app.models.ibu_hamil import IbuHamil
 from app.models.perawat import Perawat
 from app.models.puskesmas import Puskesmas
@@ -18,6 +20,7 @@ from app.schemas.notification import NotificationCreate
 from app.schemas.puskesmas import (
     PuskesmasAdminResponse,
     PuskesmasCreate,
+    PuskesmasProfileUpdate,
     PuskesmasResponse,
     PuskesmasSubmitForApproval,
     PuskesmasUpdate,
@@ -263,6 +266,385 @@ async def find_nearest_puskesmas(
             )
         )
     return response_list
+
+
+# =============================================================================
+# PUSKESMAS SELF-SERVICE ENDPOINTS (menggunakan token, tanpa puskesmas_id)
+# =============================================================================
+
+@router.get(
+    "/me",
+    response_model=PuskesmasAdminResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get own puskesmas profile",
+    description="""
+Mendapatkan data profile puskesmas yang sedang login.
+
+**Akses:**
+- Admin puskesmas (role: 'puskesmas')
+
+**Response:**
+- Data lengkap puskesmas termasuk statistik jumlah ibu hamil dan perawat aktif
+""",
+    responses={
+        200: {
+            "description": "Profile puskesmas berhasil diambil",
+        },
+        403: {
+            "description": "Bukan admin puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): puskesmas"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan untuk user ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas tidak ditemukan untuk akun ini"}
+                }
+            }
+        }
+    }
+)
+async def get_my_puskesmas(
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> PuskesmasAdminResponse:
+    """
+    Get profile puskesmas untuk admin puskesmas yang sedang login.
+    
+    Menggunakan token untuk mengidentifikasi puskesmas, tidak perlu parameter puskesmas_id.
+    """
+    # Cari puskesmas berdasarkan admin_user_id
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk akun ini",
+        )
+    
+    # Get stats
+    result = crud_puskesmas.get_with_stats(db, puskesmas_id=puskesmas.id)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan",
+        )
+    
+    puskesmas_obj, ibu_count, perawat_count = result
+    return _build_admin_response(puskesmas_obj, ibu_count, perawat_count)
+
+
+@router.put(
+    "/me",
+    response_model=PuskesmasResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update own puskesmas profile",
+    description="""
+Update data profile puskesmas yang sedang login.
+
+**Akses:**
+- Admin puskesmas (role: 'puskesmas')
+
+**Field yang dapat diupdate:**
+- Informasi dasar: name, address, email, phone
+- Informasi kepala: kepala_name, kepala_nip
+- Dokumen: sk_document_url, npwp_document_url, building_photo_url, npwp
+- Lokasi: latitude, longitude
+
+**Field yang TIDAK dapat diupdate (protected):**
+- registration_status (hanya super_admin yang dapat mengubah)
+- is_active (hanya super_admin)
+- admin_user_id, approved_by_admin_id, dll
+
+**Catatan:**
+- Puskesmas harus sudah dalam status 'approved' untuk dapat mengupdate profile
+- Untuk puskesmas dengan status 'draft' atau 'pending_approval', gunakan endpoint registrasi
+""",
+    responses={
+        200: {
+            "description": "Profile puskesmas berhasil diupdate",
+        },
+        400: {
+            "description": "Puskesmas belum diapprove",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Tidak dapat mengupdate profile. Puskesmas belum diapprove."}
+                }
+            }
+        },
+        403: {
+            "description": "Bukan admin puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): puskesmas"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan untuk user ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas tidak ditemukan untuk akun ini"}
+                }
+            }
+        }
+    }
+)
+async def update_my_puskesmas(
+    profile_in: PuskesmasProfileUpdate,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> Puskesmas:
+    """
+    Update profile puskesmas untuk admin puskesmas yang sedang login.
+    
+    Menggunakan token untuk mengidentifikasi puskesmas, tidak perlu parameter puskesmas_id.
+    Hanya field tertentu yang dapat diupdate oleh admin puskesmas.
+    """
+    # Cari puskesmas berdasarkan admin_user_id
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk akun ini",
+        )
+    
+    # Hanya puskesmas yang sudah approved yang dapat update profile
+    if puskesmas.registration_status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tidak dapat mengupdate profile. Puskesmas belum diapprove.",
+        )
+    
+    # Convert PuskesmasProfileUpdate to PuskesmasUpdate untuk reuse fungsi update
+    update_data = profile_in.model_dump(exclude_unset=True)
+    puskesmas_update = PuskesmasUpdate(**update_data)
+    
+    # Update puskesmas
+    updated = crud_puskesmas.update_with_location(db, db_obj=puskesmas, obj_in=puskesmas_update)
+    
+    return updated
+
+
+@router.get(
+    "/me/ibu-hamil",
+    response_model=List[IbuHamilResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List ibu hamil di puskesmas sendiri",
+    description="""
+Mendapatkan daftar ibu hamil yang terdaftar di puskesmas yang sedang login.
+
+**Akses:**
+- Admin puskesmas (role: 'puskesmas')
+
+**Query Parameters:**
+- skip: Jumlah data yang dilewati (default: 0)
+- limit: Maksimal jumlah data yang dikembalikan (default: 100)
+- is_active: Filter berdasarkan status aktif (optional)
+- has_perawat: Filter berdasarkan apakah sudah memiliki perawat (optional)
+
+**Response:**
+- Daftar ibu hamil yang ter-assign ke puskesmas ini
+- Sudah diurutkan berdasarkan tanggal registrasi terbaru
+""",
+    responses={
+        200: {
+            "description": "Daftar ibu hamil berhasil diambil",
+        },
+        400: {
+            "description": "Puskesmas belum aktif",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas belum aktif atau belum diapprove"}
+                }
+            }
+        },
+        403: {
+            "description": "Bukan admin puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): puskesmas"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan untuk user ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas tidak ditemukan untuk akun ini"}
+                }
+            }
+        }
+    }
+)
+async def list_my_ibu_hamil(
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    has_perawat: Optional[bool] = None,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> List[IbuHamil]:
+    """
+    Mendapatkan daftar ibu hamil di puskesmas untuk admin puskesmas yang sedang login.
+    
+    Menggunakan token untuk mengidentifikasi puskesmas, tidak perlu parameter puskesmas_id.
+    Ini adalah best practice karena:
+    1. Lebih secure - user tidak perlu mengetahui puskesmas_id
+    2. Lebih simple - cukup kirim token saja
+    3. Mencegah akses ke data puskesmas lain
+    """
+    # Cari puskesmas berdasarkan admin_user_id
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk akun ini",
+        )
+    
+    # Validasi puskesmas sudah aktif
+    if not puskesmas.is_active or puskesmas.registration_status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Puskesmas belum aktif atau belum diapprove",
+        )
+    
+    # Build query
+    stmt = (
+        select(IbuHamil)
+        .where(IbuHamil.puskesmas_id == puskesmas.id)
+        .order_by(IbuHamil.created_at.desc())
+    )
+    
+    # Apply filters
+    if is_active is not None:
+        stmt = stmt.where(IbuHamil.is_active == is_active)
+    
+    if has_perawat is not None:
+        if has_perawat:
+            stmt = stmt.where(IbuHamil.perawat_id.isnot(None))
+        else:
+            stmt = stmt.where(IbuHamil.perawat_id.is_(None))
+    
+    # Apply pagination
+    stmt = stmt.offset(skip).limit(limit)
+    
+    return db.scalars(stmt).all()
+
+
+@router.get(
+    "/me/statistics",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="Get puskesmas dashboard statistics",
+    description="""
+Mendapatkan statistik dashboard puskesmas yang sedang login.
+
+**Akses:**
+- Admin puskesmas (role: 'puskesmas')
+
+**Response:**
+- puskesmas_id: ID puskesmas
+- puskesmas_name: Nama puskesmas
+- total_perawat: Total perawat terdaftar di puskesmas
+- total_ibu_hamil: Total ibu hamil terdaftar di puskesmas
+- pemeriksaan_hari_ini: Jumlah health record (pemeriksaan) untuk hari ini
+- pasien_belum_ditugaskan: Ibu hamil yang belum memiliki perawat
+- persentase_belum_ditugaskan: Persentase ibu hamil yang belum mendapatkan perawat
+- distribusi_risiko: Distribusi risiko ibu hamil (dummy data untuk saat ini)
+""",
+)
+async def get_my_puskesmas_statistics(
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Mendapatkan statistik dashboard puskesmas untuk admin puskesmas yang sedang login.
+    """
+    # Cari puskesmas berdasarkan admin_user_id
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk akun ini",
+        )
+    
+    # 1. Total perawat
+    total_perawat = db.scalar(
+        select(func.count(Perawat.id)).where(
+            Perawat.puskesmas_id == puskesmas.id,
+            Perawat.is_active == True
+        )
+    ) or 0
+    
+    # 2. Total ibu hamil
+    total_ibu_hamil = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True
+        )
+    ) or 0
+    
+    # 3. Pemeriksaan hari ini (health records untuk ibu hamil di puskesmas ini pada hari ini)
+    today = date.today()
+    
+    # Subquery untuk mendapatkan ibu_hamil_id yang terdaftar di puskesmas ini
+    ibu_hamil_ids_subquery = (
+        select(IbuHamil.id)
+        .where(IbuHamil.puskesmas_id == puskesmas.id)
+    )
+    
+    pemeriksaan_hari_ini = db.scalar(
+        select(func.count(HealthRecord.id)).where(
+            HealthRecord.ibu_hamil_id.in_(ibu_hamil_ids_subquery),
+            HealthRecord.checkup_date == today
+        )
+    ) or 0
+    
+    # 4. Pasien yang belum ditugaskan (ibu hamil yang belum dapat perawat)
+    pasien_belum_ditugaskan = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True,
+            IbuHamil.perawat_id.is_(None)
+        )
+    ) or 0
+    
+    # 6. Persentase ibu hamil yang belum mendapatkan perawat
+    persentase_belum_ditugaskan = 0.0
+    if total_ibu_hamil > 0:
+        persentase_belum_ditugaskan = round((pasien_belum_ditugaskan / total_ibu_hamil) * 100, 2)
+    
+    # 5. Distribusi risiko ibu hamil (DUMMY DATA untuk saat ini)
+    # TODO: Implementasi real ketika field risk_level sudah digunakan
+    distribusi_risiko = {
+        "rendah": 0,
+        "sedang": 0,
+        "tinggi": 0,
+        "note": "Data dummy - implementasi risk level belum tersedia"
+    }
+    
+    # Coba ambil data real jika ada field risk_level
+    # Untuk saat ini, kita berikan estimasi berdasarkan total ibu hamil
+    if total_ibu_hamil > 0:
+        # Dummy distribution: 60% rendah, 30% sedang, 10% tinggi
+        distribusi_risiko["rendah"] = int(total_ibu_hamil * 0.6)
+        distribusi_risiko["sedang"] = int(total_ibu_hamil * 0.3)
+        distribusi_risiko["tinggi"] = total_ibu_hamil - distribusi_risiko["rendah"] - distribusi_risiko["sedang"]
+    
+    return {
+        "puskesmas_id": puskesmas.id,
+        "puskesmas_name": puskesmas.name,
+        "total_perawat": total_perawat,
+        "total_ibu_hamil": total_ibu_hamil,
+        "pemeriksaan_hari_ini": pemeriksaan_hari_ini,
+        "pasien_belum_ditugaskan": pasien_belum_ditugaskan,
+        "persentase_belum_ditugaskan": persentase_belum_ditugaskan,
+        "distribusi_risiko": distribusi_risiko,
+    }
 
 
 @router.get(

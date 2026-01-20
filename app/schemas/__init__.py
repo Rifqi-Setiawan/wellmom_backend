@@ -9,6 +9,7 @@ from .puskesmas import (
 	PuskesmasBase,
 	PuskesmasCreate,
 	PuskesmasUpdate,
+	PuskesmasProfileUpdate,
 	PuskesmasResponse,
 	PuskesmasAdminResponse,
 	PuskesmasApproval,
