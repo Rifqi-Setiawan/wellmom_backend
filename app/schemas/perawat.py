@@ -54,55 +54,32 @@ class PerawatCreate(PerawatBase):
     """Schema untuk membuat perawat baru"""
     pass
 
-class PerawatRegisterWithUser(BaseModel):
-    """Schema untuk registrasi perawat dengan user oleh Puskesmas (legacy, deprecated)"""
-    # User fields
-    phone: str = Field(..., pattern=r'^\+?[0-9]{10,15}$')
-    email: EmailStr
-    full_name: str = Field(..., min_length=3, max_length=255)
-    
-    # Perawat fields
-    nip: Optional[str] = Field(None, min_length=5, max_length=50)
-    nik: Optional[str] = Field(None, min_length=16, max_length=16)
-    job_title: Optional[str] = Field(None, max_length=100)
-    license_number: Optional[str] = Field(None, max_length=50)
-    max_patients: Optional[int] = Field(10, ge=1, le=50)
-    
-    @field_validator('phone')
+class PerawatGenerate(BaseModel):
+    """Schema untuk membuat akun perawat oleh Puskesmas.
+
+    Puskesmas memasukkan data lengkap perawat.
+    Password otomatis menggunakan NIP.
+    Akun langsung aktif tanpa proses aktivasi email.
+    """
+    nama_lengkap: str = Field(..., min_length=3, max_length=255, description="Nama lengkap perawat")
+    nomor_hp: str = Field(..., pattern=r'^\+?[0-9]{10,15}$', description="Nomor HP perawat")
+    nip: str = Field(..., min_length=5, max_length=50, description="NIP perawat (juga digunakan sebagai password awal)")
+    email: EmailStr = Field(..., description="Email aktif perawat untuk login")
+
+    @field_validator('nomor_hp')
     @classmethod
     def validate_phone(cls, v: str) -> str:
         cleaned = v.replace(' ', '').replace('-', '')
         if not cleaned.replace('+', '').isdigit():
-            raise ValueError('Phone must contain only numbers')
+            raise ValueError('Nomor HP hanya boleh berisi angka')
         return cleaned
-    
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "phone": "+6281234567890",
-            "email": "siti@example.com",
-            "full_name": "Siti Nurhaliza",
-            "nik": "3175091201850001",
-            "job_title": "Bidan",
-            "license_number": "BID-123456",
-            "max_patients": 15
-        }
-    })
-
-
-class PerawatGenerate(BaseModel):
-    """Schema untuk generate akun perawat oleh Puskesmas (simplified).
-    
-    Puskesmas hanya perlu memasukkan email dan NIP.
-    Password otomatis menggunakan NIP.
-    Perawat dapat mengubah password setelah aktivasi.
-    """
-    email: EmailStr = Field(..., description="Email perawat untuk login dan aktivasi")
-    nip: str = Field(..., min_length=5, max_length=50, description="NIP perawat (juga digunakan sebagai password awal)")
-    
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "email": "siti.nurhaliza@puskesmas.go.id",
-            "nip": "198501012015011001"
+            "nama_lengkap": "Siti Nurhaliza",
+            "nomor_hp": "+6281234567890",
+            "nip": "198501012015011001",
+            "email": "siti.nurhaliza@puskesmas.go.id"
         }
     })
 
@@ -285,7 +262,7 @@ class PerawatAssignmentInfo(BaseModel):
     nip: str
     jumlah_ibu_hamil: int
     is_active: bool
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
@@ -300,3 +277,151 @@ class PerawatAssignmentInfo(BaseModel):
             }
         }
     )
+
+
+# ============================================
+# TRANSFER PATIENT SCHEMAS
+# ============================================
+class TransferAllPatientsRequest(BaseModel):
+    """Schema untuk memindahkan semua pasien dari satu perawat ke perawat lain.
+
+    Digunakan saat perawat resign atau tidak aktif lagi.
+    """
+    target_perawat_id: int = Field(..., gt=0, description="ID perawat tujuan yang akan menerima semua pasien")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "target_perawat_id": 5
+        }
+    })
+
+
+class TransferSinglePatientRequest(BaseModel):
+    """Schema untuk memindahkan satu pasien dari perawat ke perawat lain."""
+    ibu_hamil_id: int = Field(..., gt=0, description="ID ibu hamil yang akan dipindahkan")
+    target_perawat_id: int = Field(..., gt=0, description="ID perawat tujuan")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "ibu_hamil_id": 10,
+            "target_perawat_id": 5
+        }
+    })
+
+
+class TransferPatientResponse(BaseModel):
+    """Response untuk transfer pasien."""
+    success: bool
+    message: str
+    transferred_count: int = Field(..., description="Jumlah pasien yang berhasil dipindahkan")
+    source_perawat: Optional["TransferPerawatInfo"] = None
+    target_perawat: Optional["TransferPerawatInfo"] = None
+    transferred_patients: Optional[list] = Field(default=None, description="Daftar ID pasien yang dipindahkan")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "success": True,
+            "message": "Berhasil memindahkan 5 pasien",
+            "transferred_count": 5,
+            "source_perawat": {
+                "id": 1,
+                "nama_lengkap": "Perawat Lama",
+                "current_patients": 0
+            },
+            "target_perawat": {
+                "id": 5,
+                "nama_lengkap": "Perawat Baru",
+                "current_patients": 5
+            },
+            "transferred_patients": [10, 11, 12, 13, 14]
+        }
+    })
+
+
+class TransferPerawatInfo(BaseModel):
+    """Info perawat untuk response transfer."""
+    id: int
+    nama_lengkap: str
+    current_patients: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================
+# MY NURSES LIST SCHEMAS (for Puskesmas Admin)
+# ============================================
+class MyNurseItem(BaseModel):
+    """Item detail perawat untuk daftar perawat puskesmas."""
+    id: int
+    user_id: Optional[int] = None
+    nama_lengkap: str
+    email: str
+    nomor_hp: str
+    nip: str
+    profile_photo_url: Optional[str] = None
+    is_active: bool
+    current_patients: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": 1,
+            "user_id": 10,
+            "nama_lengkap": "Siti Nurhaliza",
+            "email": "siti.nurhaliza@puskesmas.go.id",
+            "nomor_hp": "+6281234567890",
+            "nip": "198501012015011001",
+            "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg",
+            "is_active": True,
+            "current_patients": 5,
+            "created_at": "2025-01-01T10:00:00",
+            "updated_at": "2025-01-02T11:00:00"
+        }
+    })
+
+
+class MyNursesResponse(BaseModel):
+    """Response untuk endpoint list perawat milik puskesmas."""
+    puskesmas_id: int
+    puskesmas_name: str
+    total_perawat: int
+    perawat_aktif: int
+    perawat_list: list[MyNurseItem]
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "puskesmas_id": 1,
+            "puskesmas_name": "Puskesmas Hamparan Pugu",
+            "total_perawat": 3,
+            "perawat_aktif": 2,
+            "perawat_list": [
+                {
+                    "id": 1,
+                    "user_id": 10,
+                    "nama_lengkap": "Siti Nurhaliza",
+                    "email": "siti.nurhaliza@puskesmas.go.id",
+                    "nomor_hp": "+6281234567890",
+                    "nip": "198501012015011001",
+                    "profile_photo_url": None,
+                    "is_active": True,
+                    "current_patients": 5,
+                    "created_at": "2025-01-01T10:00:00",
+                    "updated_at": "2025-01-02T11:00:00"
+                },
+                {
+                    "id": 2,
+                    "user_id": 11,
+                    "nama_lengkap": "Dewi Lestari",
+                    "email": "dewi.lestari@puskesmas.go.id",
+                    "nomor_hp": "+6282345678901",
+                    "nip": "199001012020012001",
+                    "profile_photo_url": None,
+                    "is_active": True,
+                    "current_patients": 3,
+                    "created_at": "2025-01-05T09:00:00",
+                    "updated_at": "2025-01-06T10:00:00"
+                }
+            ]
+        }
+    })

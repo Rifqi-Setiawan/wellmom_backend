@@ -1394,7 +1394,7 @@ Menugaskan ibu hamil ke perawat tertentu.
 **Prasyarat:**
 - Ibu hamil HARUS sudah ter-assign ke puskesmas terlebih dahulu
 - Perawat HARUS terdaftar di puskesmas yang sama dengan ibu hamil
-- Perawat harus memiliki kapasitas (current_patients < max_patients)
+- Perawat harus aktif
 
 **Siapa yang dapat mengakses:**
 - Admin sistem
@@ -1433,9 +1433,9 @@ Menugaskan ibu hamil ke perawat tertentu.
                             "summary": "Ibu hamil belum ter-assign ke puskesmas",
                             "value": {"detail": "Ibu hamil belum ter-assign ke puskesmas. Silakan assign ke puskesmas terlebih dahulu."}
                         },
-                        "perawat_full": {
-                            "summary": "Perawat sudah mencapai kapasitas maksimal",
-                            "value": {"detail": "Perawat sudah mencapai kapasitas maksimal pasien"}
+                        "perawat_inactive": {
+                            "summary": "Perawat tidak aktif",
+                            "value": {"detail": "Perawat tidak aktif"}
                         }
                     }
                 }
@@ -1496,7 +1496,7 @@ async def assign_ibu_to_perawat(
         IbuHamil: Data ibu hamil yang sudah di-update dengan perawat_id baru
 
     Raises:
-        HTTPException 400: Ibu hamil belum ter-assign ke puskesmas atau perawat penuh
+        HTTPException 400: Ibu hamil belum ter-assign ke puskesmas atau perawat tidak aktif
         HTTPException 403: Tidak memiliki akses
         HTTPException 404: Ibu hamil atau perawat tidak ditemukan
     """
@@ -1533,11 +1533,11 @@ async def assign_ibu_to_perawat(
             detail="Perawat tidak ditemukan atau tidak terdaftar di puskesmas ibu hamil ini",
         )
 
-    # Cek kapasitas perawat
-    if perawat.current_patients >= perawat.max_patients:
+    # Cek perawat aktif
+    if not perawat.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Perawat sudah mencapai kapasitas maksimal pasien",
+            detail="Perawat tidak aktif",
         )
 
     # Assign ke perawat

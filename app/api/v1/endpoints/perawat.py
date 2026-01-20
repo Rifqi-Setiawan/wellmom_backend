@@ -1,52 +1,45 @@
-"""Perawat activation and profile endpoints (FR-TK-001).
+"""Perawat endpoints (FR-TK-001).
 
 Flow:
-- Puskesmas generates account dengan email dan NIP
+- Puskesmas membuat akun perawat dengan data lengkap (nama, HP, NIP, email)
 - Password otomatis = NIP
-- Nurse receives verification link (token) via email
-- Verify email -> login dengan email + password
-- Perawat dapat reset password sendiri
+- Akun langsung aktif tanpa perlu aktivasi email
+- Perawat dapat langsung login dengan email + NIP sebagai password
+- Perawat dapat reset password sendiri setelah login
 
 Notes:
-- We store verification token in users.verification_token.
-- Token expires after 72 hours (configurable in crud/user.py).
-- Password awal menggunakan NIP, perawat wajib ganti setelah login pertama.
+- Password awal menggunakan NIP, perawat disarankan ganti setelah login pertama.
 """
 
 from datetime import timedelta
-from typing import List, Optional
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from pydantic import BaseModel, ConfigDict, EmailStr
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, get_db, require_role
+from app.api.deps import get_db, require_role
 from app.config import settings
 from app.core.security import create_access_token, verify_password
-from app.crud import crud_user, crud_perawat, crud_puskesmas, crud_notification
-from app.crud.user import TOKEN_EXPIRATION_HOURS
+from app.crud import crud_user, crud_perawat, crud_puskesmas, crud_ibu_hamil
 from app.models.user import User
 from app.models.perawat import Perawat as PerawatModel
 from app.schemas.perawat import (
-    PerawatRegisterWithUser,
     PerawatResponse,
     PerawatGenerate,
+    PerawatUpdate,
     PerawatLoginRequest,
     PerawatLoginResponse,
     PerawatLoginUserInfo,
     PerawatLoginPerawatInfo,
     PerawatResetPasswordRequest,
+    TransferAllPatientsRequest,
+    TransferSinglePatientRequest,
+    TransferPatientResponse,
+    TransferPerawatInfo,
+    MyNursesResponse,
+    MyNurseItem,
 )
 from app.schemas.user import UserCreate
-from app.schemas.notification import NotificationCreate
-from app.services.email import EmailNotConfigured, send_email
-from app.services.email_templates import (
-    build_perawat_activation_email,
-    build_perawat_activation_success_email,
-    build_puskesmas_perawat_activated_notification,
-    build_resend_activation_email,
-)
-from app.utils.file_handler import save_profile_photo
 
 router = APIRouter(
     prefix="/perawat",
@@ -54,55 +47,8 @@ router = APIRouter(
 )
 
 
-class VerificationRequest(BaseModel):
-    user_id: int
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"user_id": 123}
-    })
-
-
-class VerificationConfirm(BaseModel):
-    token: str
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"token": "VERIF_TOKEN_ABC..."}
-    })
-
-
-class SetPasswordPayload(BaseModel):
-    token: str
-    new_password: str
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"token": "VERIF_TOKEN_ABC...", "new_password": "StrongPass!234"}
-    })
-
-
-class CompleteProfilePayload(BaseModel):
-    token: str
-    profile_photo_url: str
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"token": "VERIF_TOKEN_ABC...", "profile_photo_url": "https://cdn.example.com/photos/perawat.jpg"}
-    })
-
-
-class AcceptTermsPayload(BaseModel):
-    token: str
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"token": "VERIF_TOKEN_ABC..."}
-    })
-
-
 def _get_perawat_by_user(db: Session, user_id: int) -> PerawatModel | None:
     return db.query(PerawatModel).filter(PerawatModel.user_id == user_id).first()
-
-
-def _build_activation_link(token: str) -> str:
-    """Build activation link from token."""
-    return f"{settings.FRONTEND_BASE_URL.rstrip('/')}/perawat/activate?token={token}"
 
 
 def _build_login_url() -> str:
@@ -110,32 +56,28 @@ def _build_login_url() -> str:
     return f"{settings.FRONTEND_BASE_URL.rstrip('/')}/perawat/login"
 
 
-def _build_dashboard_url() -> str:
-    """Build dashboard URL for puskesmas admin."""
-    return f"{settings.FRONTEND_BASE_URL.rstrip('/')}/puskesmas/dashboard/perawat"
-
-
 @router.post(
     "/generate",
     status_code=status.HTTP_201_CREATED,
-    summary="Puskesmas generate akun perawat (email + NIP)",
+    summary="Puskesmas membuat akun perawat baru",
     description="""
-Generate akun perawat baru oleh Puskesmas.
+Membuat akun perawat baru oleh Puskesmas. Akun langsung aktif tanpa proses aktivasi email.
 
 ## Request Body
-- **email**: Email perawat (untuk login dan menerima aktivasi)
+- **nama_lengkap**: Nama lengkap perawat
+- **nomor_hp**: Nomor HP perawat (format: +62xxx atau 08xxx)
 - **nip**: NIP perawat (juga digunakan sebagai password awal)
+- **email**: Email aktif perawat untuk login
 
 ## Flow
-1. Puskesmas memasukkan email dan NIP perawat
-2. Sistem membuat akun user dan perawat
+1. Puskesmas memasukkan data lengkap perawat
+2. Sistem membuat akun user dan perawat (langsung aktif)
 3. Password otomatis menggunakan NIP
-4. Email aktivasi dikirim ke perawat
-5. Perawat dapat login dengan email + password (NIP)
-6. Perawat disarankan untuk mengubah password setelah login pertama
+4. Perawat dapat langsung login dengan email + NIP sebagai password
+5. Perawat disarankan untuk mengubah password setelah login pertama
 
 ## Response
-Mengembalikan informasi akun yang dibuat dan link aktivasi.
+Mengembalikan informasi akun yang dibuat.
     """,
 )
 def generate_perawat_account(
@@ -143,7 +85,7 @@ def generate_perawat_account(
     current_user: User = Depends(require_role("puskesmas")),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Puskesmas creates a nurse account with email and NIP. Password = NIP."""
+    """Puskesmas creates a nurse account. Account is immediately active. Password = NIP."""
     puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
     if not puskesmas:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Puskesmas profile not found for this user")
@@ -156,26 +98,23 @@ def generate_perawat_account(
     if crud_perawat.get_by_nip(db, nip=payload.nip):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="NIP sudah terdaftar")
 
-    # Extract name from email (before @) as placeholder
-    email_name = payload.email.split("@")[0].replace(".", " ").replace("_", " ").title()
-    full_name = email_name if email_name else f"Perawat {payload.nip}"
-    
-    # Generate placeholder phone (will be updated by perawat later)
-    placeholder_phone = f"+62000{payload.nip[-8:]}" if len(payload.nip) >= 8 else f"+62000{payload.nip}"
+    # Check phone uniqueness
+    if crud_user.get_by_phone(db, phone=payload.nomor_hp):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nomor HP sudah terdaftar")
 
-    # Create user with password = NIP
+    # Create user with password = NIP (account immediately active)
     user = crud_user.create_user(
         db,
         user_in=UserCreate(
-            phone=placeholder_phone,
+            phone=payload.nomor_hp,
             password=payload.nip,  # Password = NIP
-            full_name=full_name,
+            full_name=payload.nama_lengkap,
             role="perawat",
             email=payload.email,
         ),
     )
-    user.is_active = False  # Inactive until activation
-    user.is_verified = False
+    user.is_active = True  # Immediately active
+    user.is_verified = True  # No email verification needed
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -184,56 +123,28 @@ def generate_perawat_account(
     perawat = PerawatModel(
         user_id=user.id,
         puskesmas_id=puskesmas.id,
-        nama_lengkap=full_name,
+        nama_lengkap=payload.nama_lengkap,
         email=payload.email,
-        nomor_hp=placeholder_phone,
+        nomor_hp=payload.nomor_hp,
         nip=payload.nip,
-        is_active=False,  # Inactive until activation
+        is_active=True,  # Immediately active
     )
     db.add(perawat)
     db.commit()
     db.refresh(perawat)
 
-    # Create verification token with expiration
-    token = crud_user.create_verification_token(db, user_id=user.id)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create verification token")
-
-    activation_link = _build_activation_link(token)
-
-    # Build professional email
-    subject, html_body, text_body = build_perawat_activation_email(
-        nurse_name=full_name,
-        puskesmas_name=puskesmas.name,
-        activation_link=activation_link,
-        email=payload.email,
-        nip=payload.nip,
-        expires_in_hours=TOKEN_EXPIRATION_HOURS,
-    )
-
-    email_sent = False
-    email_error = None
-    try:
-        send_email(to_email=payload.email, subject=subject, html_content=html_body, text_content=text_body)
-        email_sent = True
-    except EmailNotConfigured as e:
-        email_error = str(e)
-    except Exception as e:
-        email_error = str(e)
-
     return {
         "user_id": user.id,
         "perawat_id": perawat.id,
+        "nama_lengkap": payload.nama_lengkap,
         "email": payload.email,
+        "nomor_hp": payload.nomor_hp,
         "nip": payload.nip,
-        "full_name": full_name,
         "puskesmas_id": puskesmas.id,
         "puskesmas_name": puskesmas.name,
-        "activation_link": activation_link,
-        "email_sent": email_sent,
-        "email_error": email_error if not email_sent else None,
-        "token_expires_in_hours": TOKEN_EXPIRATION_HOURS,
-        "message": "Akun perawat berhasil dibuat. Password awal adalah NIP. Perawat dapat login setelah aktivasi.",
+        "is_active": True,
+        "login_url": _build_login_url(),
+        "message": "Akun perawat berhasil dibuat dan langsung aktif. Password awal adalah NIP. Perawat dapat langsung login.",
     }
 
 
@@ -247,8 +158,7 @@ Login endpoint untuk perawat menggunakan email dan password.
 
 ## Persyaratan Login
 1. **User harus memiliki role `perawat`**
-2. **Akun harus sudah diverifikasi** (`is_verified = true`)
-3. **Akun harus aktif** (`is_active = true`)
+2. **Akun harus aktif** (`is_active = true`)
 
 ## Password Awal
 Password awal adalah NIP yang digenerate oleh Puskesmas.
@@ -278,7 +188,7 @@ def login_perawat(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Akun belum diaktivasi. Silakan cek email untuk link aktivasi.",
+            detail="Akun tidak aktif. Hubungi admin puskesmas.",
         )
 
     # Step 3: Verify user has perawat role
@@ -364,7 +274,7 @@ def reset_password_perawat(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password saat ini salah",
         )
-    
+
     # Update password
     updated = crud_user.update_password(db, user_id=current_user.id, new_password=payload.new_password)
     if not updated:
@@ -372,534 +282,10 @@ def reset_password_perawat(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Gagal mengubah password",
         )
-    
+
     return {
         "message": "Password berhasil diubah",
         "user_id": current_user.id,
-    }
-
-
-class ResendActivationRequest(BaseModel):
-    """Schema untuk resend activation email."""
-    email: EmailStr
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"email": "perawat@puskesmas.go.id"}
-    })
-
-
-@router.post(
-    "/activation/resend",
-    status_code=status.HTTP_200_OK,
-    summary="Resend activation email",
-    description="""
-Kirim ulang email aktivasi untuk perawat yang belum mengaktifkan akunnya.
-
-## Kapan digunakan:
-- Email aktivasi sebelumnya tidak diterima
-- Token aktivasi sudah kedaluwarsa (expired)
-- Perawat lupa mengaktifkan akunnya
-
-## Persyaratan:
-- Email harus terdaftar sebagai perawat
-- Akun belum diaktivasi (is_active = false)
-
-## Catatan:
-- Token lama akan dinonaktifkan
-- Token baru berlaku selama 72 jam
-    """,
-)
-def resend_activation_email(
-    payload: ResendActivationRequest,
-    db: Session = Depends(get_db),
-) -> dict:
-    """Resend activation email to perawat who hasn't activated their account."""
-    # Find user by email
-    user = crud_user.get_by_email(db, email=payload.email)
-    if not user or user.role != "perawat":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Email tidak ditemukan atau bukan akun perawat"
-        )
-
-    # Check if already activated
-    if user.is_active and user.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Akun sudah diaktivasi. Silakan login."
-        )
-
-    # Get perawat data
-    perawat = _get_perawat_by_user(db, user_id=user.id)
-    if not perawat:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Data perawat tidak ditemukan"
-        )
-
-    puskesmas_name = perawat.puskesmas.name if perawat.puskesmas else "Puskesmas"
-
-    # Generate new token (this invalidates the old one)
-    token = crud_user.create_verification_token(db, user_id=user.id)
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gagal membuat token aktivasi"
-        )
-
-    activation_link = _build_activation_link(token)
-
-    # Build resend email
-    subject, html_body, text_body = build_resend_activation_email(
-        nurse_name=user.full_name,
-        puskesmas_name=puskesmas_name,
-        activation_link=activation_link,
-        email=payload.email,
-        expires_in_hours=TOKEN_EXPIRATION_HOURS,
-    )
-
-    try:
-        send_email(to_email=payload.email, subject=subject, html_content=html_body, text_content=text_body)
-    except EmailNotConfigured as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Email tidak dapat dikirim: {exc}"
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Gagal mengirim email: {exc}"
-        ) from exc
-
-    return {
-        "message": "Email aktivasi berhasil dikirim ulang",
-        "email": payload.email,
-        "token_expires_in_hours": TOKEN_EXPIRATION_HOURS,
-    }
-
-
-class CheckTokenRequest(BaseModel):
-    """Schema untuk check token validity."""
-    token: str
-
-    model_config = ConfigDict(json_schema_extra={
-        "example": {"token": "VERIF_TOKEN_ABC..."}
-    })
-
-
-@router.post(
-    "/activation/check-token",
-    status_code=status.HTTP_200_OK,
-    summary="Check activation token validity",
-    description="""
-Cek apakah token aktivasi masih valid sebelum menampilkan form aktivasi.
-
-## Kegunaan:
-- Frontend dapat memverifikasi token sebelum menampilkan form
-- Menampilkan pesan yang tepat jika token expired atau invalid
-
-## Response:
-- **valid**: true jika token masih valid
-- **expired**: true jika token sudah kedaluwarsa
-- **user_info**: informasi dasar user jika token valid
-- **expires_at**: waktu token kedaluwarsa (jika valid)
-    """,
-)
-def check_token_validity(
-    payload: CheckTokenRequest,
-    db: Session = Depends(get_db),
-) -> dict:
-    """Check if activation token is still valid."""
-    # Check if token exists
-    user = crud_user.get_by_verification_token(db, token=payload.token)
-
-    if not user:
-        # Token doesn't exist or already expired
-        return {
-            "valid": False,
-            "expired": True,
-            "message": "Token tidak valid atau sudah kedaluwarsa",
-            "user_info": None,
-            "expires_at": None,
-        }
-
-    # Check if already activated
-    if user.is_active and user.is_verified:
-        return {
-            "valid": False,
-            "expired": False,
-            "message": "Akun sudah diaktivasi. Silakan login.",
-            "already_activated": True,
-            "user_info": {
-                "user_id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-            },
-            "expires_at": None,
-        }
-
-    # Get perawat data
-    perawat = _get_perawat_by_user(db, user_id=user.id)
-    puskesmas_name = perawat.puskesmas.name if perawat and perawat.puskesmas else None
-
-    return {
-        "valid": True,
-        "expired": False,
-        "message": "Token valid",
-        "user_info": {
-            "user_id": user.id,
-            "email": user.email,
-            "full_name": user.full_name,
-            "is_verified": user.is_verified,
-            "puskesmas_name": puskesmas_name,
-            "nip": perawat.nip if perawat else None,
-        },
-        "expires_at": user.verification_token_expires_at.isoformat() if user.verification_token_expires_at else None,
-    }
-
-
-@router.post(
-    "/activation/request",
-    status_code=status.HTTP_200_OK,
-    summary="Request email verification (internal)",
-    description="Internal endpoint untuk puskesmas admin mengirim ulang email aktivasi.",
-)
-def request_verification(
-    payload: VerificationRequest,
-    current_user: User = Depends(require_role("puskesmas")),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Puskesmas admin can request to resend verification email for their nurses."""
-    user = crud_user.get(db, payload.user_id)
-    if not user or user.role != "perawat":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perawat user not found")
-    if not user.email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Perawat email is required")
-
-    # Verify the perawat belongs to this puskesmas
-    perawat = _get_perawat_by_user(db, user_id=user.id)
-    if not perawat:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Perawat profile not found")
-
-    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
-    if not puskesmas or perawat.puskesmas_id != puskesmas.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perawat bukan dari puskesmas Anda")
-
-    # Check if already activated
-    if user.is_active and user.is_verified:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Perawat sudah diaktivasi")
-
-    # Generate new token
-    token = crud_user.create_verification_token(db, user_id=user.id)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create token")
-
-    activation_link = _build_activation_link(token)
-    puskesmas_name = puskesmas.name
-
-    subject, html_body, text_body = build_resend_activation_email(
-        nurse_name=user.full_name,
-        puskesmas_name=puskesmas_name,
-        activation_link=activation_link,
-        email=user.email,
-        expires_in_hours=TOKEN_EXPIRATION_HOURS,
-    )
-
-    try:
-        send_email(to_email=user.email, subject=subject, html_content=html_body, text_content=text_body)
-    except EmailNotConfigured as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    return {
-        "message": "Email aktivasi berhasil dikirim",
-        "user_id": user.id,
-        "email": user.email,
-        "activation_link": activation_link,
-        "token_expires_in_hours": TOKEN_EXPIRATION_HOURS,
-    }
-
-
-@router.post(
-    "/activation/verify",
-    status_code=status.HTTP_200_OK,
-    summary="Verify email via token (Step 1)",
-    description="""
-Verifikasi email perawat menggunakan token dari email aktivasi.
-
-**Ini adalah langkah pertama dari proses aktivasi:**
-1. **verify** - Verifikasi email (endpoint ini)
-2. set-password - Set password baru (opsional)
-3. complete-profile - Lengkapi profil
-4. accept-terms - Terima syarat & ketentuan, aktivasi akun
-
-Token tetap valid sampai langkah terakhir selesai atau expired.
-    """,
-)
-def verify_email(payload: VerificationConfirm, db: Session = Depends(get_db)) -> dict:
-    """Verify perawat email. Token is NOT cleared to allow multi-step flow."""
-    # Check if token is expired first
-    if crud_user.is_token_expired(db, token=payload.token):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token sudah kedaluwarsa. Silakan minta email aktivasi baru."
-        )
-
-    # Verify without clearing token (for multi-step flow)
-    user = crud_user.verify_by_token(db, token=payload.token, clear_token=False)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token tidak valid atau sudah kedaluwarsa"
-        )
-
-    return {
-        "message": "Email berhasil diverifikasi",
-        "user_id": user.id,
-        "is_verified": user.is_verified,
-        "next_step": "set-password atau complete-profile",
-    }
-
-
-@router.post(
-    "/activation/set-password",
-    status_code=status.HTTP_200_OK,
-    summary="Set password (Step 2 - Optional)",
-    description="""
-Set password baru untuk perawat. Langkah ini opsional karena password awal sudah diset ke NIP.
-
-**Persyaratan:**
-- Token harus valid dan belum expired
-- Password baru minimal 6 karakter
-
-**Catatan:**
-- Password awal adalah NIP perawat
-- Perawat disarankan untuk mengubah password untuk keamanan
-    """,
-)
-def set_password(payload: SetPasswordPayload, db: Session = Depends(get_db)) -> dict:
-    """Set new password for perawat during activation flow."""
-    # Check if token is expired
-    if crud_user.is_token_expired(db, token=payload.token):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token sudah kedaluwarsa. Silakan minta email aktivasi baru."
-        )
-
-    # Get user by token (without clearing)
-    user = crud_user.get_by_verification_token(db, token=payload.token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token tidak valid"
-        )
-
-    # Validate password length
-    if len(payload.new_password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password minimal 6 karakter"
-        )
-
-    updated = crud_user.update_password(db, user_id=user.id, new_password=payload.new_password)
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gagal mengubah password"
-        )
-
-    return {
-        "message": "Password berhasil diubah",
-        "user_id": updated.id,
-        "next_step": "complete-profile",
-    }
-
-
-@router.post(
-    "/activation/complete-profile",
-    response_model=PerawatResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Complete profile (Step 3)",
-    description="""
-Lengkapi profil perawat dengan foto profil.
-
-**Persyaratan:**
-- Token harus valid dan belum expired
-- URL foto profil harus valid
-
-**Catatan:**
-- Foto profil akan disimpan di User dan Perawat
-- Setelah ini, lanjut ke accept-terms untuk aktivasi final
-    """,
-)
-def complete_profile(payload: CompleteProfilePayload, db: Session = Depends(get_db)) -> PerawatModel:
-    """Complete perawat profile with photo during activation flow."""
-    # Check if token is expired
-    if crud_user.is_token_expired(db, token=payload.token):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token sudah kedaluwarsa. Silakan minta email aktivasi baru."
-        )
-
-    # Get user by token (without clearing)
-    user = crud_user.get_by_verification_token(db, token=payload.token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token tidak valid"
-        )
-
-    # Update user profile photo
-    user.profile_photo_url = payload.profile_photo_url
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    # Also update perawat profile photo
-    perawat = _get_perawat_by_user(db, user_id=user.id)
-    if not perawat:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Data perawat tidak ditemukan"
-        )
-
-    perawat.profile_photo_url = payload.profile_photo_url
-    db.add(perawat)
-    db.commit()
-    db.refresh(perawat)
-
-    return perawat
-
-
-@router.post(
-    "/activation/accept-terms",
-    status_code=status.HTTP_200_OK,
-    summary="Accept T&C and activate (Step 4 - Final)",
-    description="""
-Terima syarat & ketentuan dan aktivasi akun perawat.
-
-**Ini adalah langkah terakhir dari proses aktivasi.**
-
-Setelah endpoint ini dipanggil:
-1. Akun perawat akan diaktifkan
-2. Perawat dapat login dengan email dan password
-3. Token aktivasi akan dihapus (tidak bisa digunakan lagi)
-4. Notifikasi dikirim ke admin puskesmas
-5. Email konfirmasi dikirim ke perawat
-
-**Persyaratan:**
-- Token harus valid dan belum expired
-- Email harus sudah diverifikasi (dari step 1)
-    """,
-)
-def accept_terms(payload: AcceptTermsPayload, db: Session = Depends(get_db)) -> dict:
-    """Final step: Accept terms, activate account, and send notifications."""
-    # Check if token is expired
-    if crud_user.is_token_expired(db, token=payload.token):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token sudah kedaluwarsa. Silakan minta email aktivasi baru."
-        )
-
-    # Get user by token
-    user = crud_user.get_by_verification_token(db, token=payload.token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token tidak valid"
-        )
-
-    # Get perawat data
-    perawat = _get_perawat_by_user(db, user_id=user.id)
-    if not perawat:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Data perawat tidak ditemukan"
-        )
-
-    # Get puskesmas data for notifications
-    puskesmas = perawat.puskesmas
-    puskesmas_name = puskesmas.name if puskesmas else "Puskesmas"
-    puskesmas_admin_user_id = puskesmas.admin_user_id if puskesmas else None
-
-    # Activate user account
-    user.is_verified = True
-    user.is_active = True
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    # Clear verification token (final step)
-    crud_user.clear_verification_token(db, user_id=user.id)
-
-    # Activate perawat
-    perawat.is_active = True
-    db.add(perawat)
-    db.commit()
-    db.refresh(perawat)
-
-    # Send notifications
-    email_to_perawat_sent = False
-    email_to_puskesmas_sent = False
-
-    # 1. Send confirmation email to perawat
-    if user.email:
-        try:
-            subject, html_body, text_body = build_perawat_activation_success_email(
-                nurse_name=user.full_name,
-                puskesmas_name=puskesmas_name,
-                login_url=_build_login_url(),
-            )
-            send_email(to_email=user.email, subject=subject, html_content=html_body, text_content=text_body)
-            email_to_perawat_sent = True
-        except Exception:
-            pass  # Don't fail activation if email fails
-
-    # 2. Create in-app notification for puskesmas admin
-    if puskesmas_admin_user_id:
-        try:
-            notification_in = NotificationCreate(
-                user_id=puskesmas_admin_user_id,
-                title="Perawat Baru Aktif",
-                message=f"Perawat {user.full_name} ({perawat.nip}) telah mengaktifkan akunnya dan siap bertugas.",
-                notification_type="system",
-                priority="normal",
-                sent_via="in_app",
-            )
-            crud_notification.create(db, obj_in=notification_in)
-        except Exception:
-            pass  # Don't fail activation if notification fails
-
-    # 3. Send email notification to puskesmas admin
-    if puskesmas and puskesmas.admin_user_id:
-        try:
-            # Get puskesmas admin user for email
-            admin_user = crud_user.get(db, puskesmas.admin_user_id)
-            if admin_user and admin_user.email:
-                subject, html_body, text_body = build_puskesmas_perawat_activated_notification(
-                    admin_name=admin_user.full_name,
-                    nurse_name=user.full_name,
-                    nurse_email=user.email or perawat.email,
-                    nurse_nip=perawat.nip,
-                    puskesmas_name=puskesmas_name,
-                    dashboard_url=_build_dashboard_url(),
-                )
-                send_email(to_email=admin_user.email, subject=subject, html_content=html_body, text_content=text_body)
-                email_to_puskesmas_sent = True
-        except Exception:
-            pass  # Don't fail activation if email fails
-
-    return {
-        "message": "Akun berhasil diaktivasi! Anda dapat login sekarang.",
-        "user_id": user.id,
-        "perawat_id": perawat.id,
-        "email": user.email,
-        "puskesmas_name": puskesmas_name,
-        "notifications": {
-            "email_to_perawat_sent": email_to_perawat_sent,
-            "email_to_puskesmas_sent": email_to_puskesmas_sent,
-            "in_app_notification_created": puskesmas_admin_user_id is not None,
-        },
-        "login_url": _build_login_url(),
     }
 
 
@@ -920,25 +306,27 @@ def list_perawat(
 
 @router.get(
     "/puskesmas/my-nurses",
+    response_model=MyNursesResponse,
     status_code=status.HTTP_200_OK,
     summary="List perawat milik puskesmas (untuk admin puskesmas)",
     description="""
 Endpoint untuk puskesmas admin melihat daftar semua perawat yang terdaftar di puskesmas mereka.
 
-## Response meliputi:
-- Informasi dasar perawat (nama, email, NIP)
-- Status aktivasi (sudah aktif atau belum)
-- Tanggal pendaftaran
+## Autentikasi
+Membutuhkan token dengan role `puskesmas`.
 
-## Kegunaan:
-- Memantau perawat mana yang sudah mengaktifkan akun
-- Mengetahui perawat mana yang perlu dikirim ulang email aktivasi
+## Response meliputi:
+- **puskesmas_id**: ID puskesmas
+- **puskesmas_name**: Nama puskesmas
+- **total_perawat**: Jumlah total perawat terdaftar
+- **perawat_aktif**: Jumlah perawat yang aktif
+- **perawat_list**: Daftar detail perawat (id, nama, email, NIP, status, jumlah pasien, dll)
     """,
 )
 def list_my_nurses(
     current_user: User = Depends(require_role("puskesmas")),
     db: Session = Depends(get_db),
-) -> dict:
+) -> MyNursesResponse:
     """Get list of nurses registered under current puskesmas admin."""
     # Get puskesmas for current admin
     puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
@@ -955,36 +343,517 @@ def list_my_nurses(
 
     result = []
     for perawat in perawat_list:
-        # Get linked user for activation status
-        user = db.query(User).filter(User.id == perawat.user_id).first() if perawat.user_id else None
+        result.append(MyNurseItem(
+            id=perawat.id,
+            user_id=perawat.user_id,
+            nama_lengkap=perawat.nama_lengkap,
+            email=perawat.email,
+            nomor_hp=perawat.nomor_hp,
+            nip=perawat.nip,
+            profile_photo_url=perawat.profile_photo_url,
+            is_active=perawat.is_active,
+            current_patients=perawat.current_patients or 0,
+            created_at=perawat.created_at.isoformat() if perawat.created_at else None,
+            updated_at=perawat.updated_at.isoformat() if perawat.updated_at else None,
+        ))
 
-        result.append({
-            "id": perawat.id,
-            "user_id": perawat.user_id,
-            "nama_lengkap": perawat.nama_lengkap,
-            "email": perawat.email,
-            "nomor_hp": perawat.nomor_hp,
-            "nip": perawat.nip,
-            "profile_photo_url": perawat.profile_photo_url,
-            "is_active": perawat.is_active,
-            "created_at": perawat.created_at.isoformat() if perawat.created_at else None,
-            "updated_at": perawat.updated_at.isoformat() if perawat.updated_at else None,
-            # User activation status
-            "activation_status": {
-                "is_verified": user.is_verified if user else False,
-                "is_user_active": user.is_active if user else False,
-                "has_pending_token": user.verification_token is not None if user else False,
-                "token_expires_at": user.verification_token_expires_at.isoformat() if user and user.verification_token_expires_at else None,
-            } if user else None,
-        })
+    return MyNursesResponse(
+        puskesmas_id=puskesmas.id,
+        puskesmas_name=puskesmas.name,
+        total_perawat=len(result),
+        perawat_aktif=sum(1 for p in result if p.is_active),
+        perawat_list=result,
+    )
+
+
+@router.patch(
+    "/{perawat_id}",
+    response_model=PerawatResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update data perawat",
+    description="""
+Update data perawat oleh admin puskesmas.
+
+## Field yang dapat diupdate:
+- **nama_lengkap**: Nama lengkap perawat
+- **nomor_hp**: Nomor HP perawat
+- **email**: Email perawat
+- **nip**: NIP perawat
+- **is_active**: Status aktif perawat
+- **profile_photo_url**: URL foto profil
+
+## Validasi:
+- Hanya admin puskesmas yang dapat update
+- Perawat harus milik puskesmas yang sama
+- Email dan NIP harus unik (jika diubah)
+    """,
+)
+def update_perawat(
+    perawat_id: int,
+    payload: PerawatUpdate,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> PerawatModel:
+    """Update perawat data by puskesmas admin."""
+    # Get puskesmas for current admin
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk user ini"
+        )
+
+    # Get perawat
+    perawat = crud_perawat.get(db, perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tidak ditemukan"
+        )
+
+    # Verify perawat belongs to this puskesmas
+    if perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat bukan dari puskesmas Anda"
+        )
+
+    # Get update data (only fields that are set)
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Validate email uniqueness if being updated
+    if "email" in update_data and update_data["email"] != perawat.email:
+        existing_user = crud_user.get_by_email(db, email=update_data["email"])
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email sudah terdaftar"
+            )
+        existing_perawat = crud_perawat.get_by_email(db, email=update_data["email"])
+        if existing_perawat and existing_perawat.id != perawat_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email sudah terdaftar sebagai perawat lain"
+            )
+
+    # Validate NIP uniqueness if being updated
+    if "nip" in update_data and update_data["nip"] != perawat.nip:
+        existing_perawat = crud_perawat.get_by_nip(db, nip=update_data["nip"])
+        if existing_perawat and existing_perawat.id != perawat_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="NIP sudah terdaftar"
+            )
+
+    # Validate phone uniqueness if being updated
+    if "nomor_hp" in update_data and update_data["nomor_hp"] != perawat.nomor_hp:
+        existing_user = crud_user.get_by_phone(db, phone=update_data["nomor_hp"])
+        if existing_user and existing_user.id != perawat.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nomor HP sudah terdaftar"
+            )
+
+    # Update perawat fields
+    for field, value in update_data.items():
+        setattr(perawat, field, value)
+
+    # Also update linked user if relevant fields changed
+    if perawat.user_id:
+        user = crud_user.get(db, perawat.user_id)
+        if user:
+            if "email" in update_data:
+                user.email = update_data["email"]
+            if "nama_lengkap" in update_data:
+                user.full_name = update_data["nama_lengkap"]
+            if "nomor_hp" in update_data:
+                user.phone = update_data["nomor_hp"]
+            if "profile_photo_url" in update_data:
+                user.profile_photo_url = update_data["profile_photo_url"]
+            if "is_active" in update_data:
+                user.is_active = update_data["is_active"]
+            db.add(user)
+
+    db.add(perawat)
+
+    try:
+        db.commit()
+        db.refresh(perawat)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengupdate perawat: {str(e)}"
+        )
+
+    return perawat
+
+
+@router.delete(
+    "/{perawat_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Hapus akun perawat",
+    description="""
+Hapus akun perawat oleh admin puskesmas.
+
+## Validasi:
+- Hanya admin puskesmas yang dapat menghapus
+- Perawat harus milik puskesmas yang sama
+- Perawat yang masih memiliki pasien tidak dapat dihapus (harus transfer dulu)
+
+## Efek:
+- Data perawat akan dihapus dari database
+- Data user yang terkait juga akan dihapus
+    """,
+)
+def delete_perawat(
+    perawat_id: int,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Delete perawat by puskesmas admin."""
+    # Get puskesmas for current admin
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk user ini"
+        )
+
+    # Get perawat
+    perawat = crud_perawat.get(db, perawat_id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tidak ditemukan"
+        )
+
+    # Verify perawat belongs to this puskesmas
+    if perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat bukan dari puskesmas Anda"
+        )
+
+    # Check if perawat has patients
+    patients = crud_ibu_hamil.get_by_perawat(db, perawat_id=perawat_id)
+    if patients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tidak dapat menghapus perawat yang masih memiliki {len(patients)} pasien. Silakan transfer pasien terlebih dahulu."
+        )
+
+    # Store info for response
+    perawat_info = {
+        "id": perawat.id,
+        "nama_lengkap": perawat.nama_lengkap,
+        "email": perawat.email,
+        "nip": perawat.nip,
+    }
+    user_id = perawat.user_id
+
+    # Delete perawat
+    db.delete(perawat)
+
+    # Delete linked user if exists
+    if user_id:
+        user = crud_user.get(db, user_id)
+        if user:
+            db.delete(user)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal menghapus perawat: {str(e)}"
+        )
 
     return {
-        "puskesmas_id": puskesmas.id,
-        "puskesmas_name": puskesmas.name,
-        "total_perawat": len(result),
-        "perawat_aktif": sum(1 for p in result if p["is_active"] and p.get("activation_status", {}).get("is_user_active")),
-        "perawat_pending": sum(1 for p in result if not p["is_active"] or (p.get("activation_status") and not p["activation_status"].get("is_user_active"))),
-        "perawat_list": result,
+        "message": f"Perawat {perawat_info['nama_lengkap']} berhasil dihapus",
+        "deleted_perawat": perawat_info,
     }
 
 
+@router.post(
+    "/{source_perawat_id}/transfer-all-patients",
+    response_model=TransferPatientResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Transfer semua pasien ke perawat lain (bulk transfer)",
+    description="""
+Transfer semua pasien (ibu hamil) dari satu perawat ke perawat lain.
+
+## Kegunaan
+- Menangani kasus perawat resign atau tidak aktif
+- Memindahkan seluruh beban kerja ke perawat pengganti
+
+## Validasi
+- Kedua perawat harus dari puskesmas yang sama
+- Perawat sumber harus memiliki minimal 1 pasien
+- Perawat tujuan harus aktif
+- Hanya admin puskesmas yang dapat melakukan transfer
+
+## Efek
+- Semua `ibu_hamil.perawat_id` yang sebelumnya merujuk ke perawat sumber akan diubah ke perawat tujuan
+- `current_patients` perawat sumber akan menjadi 0
+- `current_patients` perawat tujuan akan bertambah sesuai jumlah pasien yang dipindahkan
+    """,
+)
+def transfer_all_patients(
+    source_perawat_id: int,
+    payload: TransferAllPatientsRequest,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> TransferPatientResponse:
+    """Transfer all patients from one perawat to another."""
+    # Get puskesmas for current admin
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk user ini"
+        )
+
+    # Get source perawat
+    source_perawat = crud_perawat.get(db, source_perawat_id)
+    if not source_perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat sumber tidak ditemukan"
+        )
+
+    # Verify source perawat belongs to this puskesmas
+    if source_perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat sumber bukan dari puskesmas Anda"
+        )
+
+    # Get target perawat
+    target_perawat = crud_perawat.get(db, payload.target_perawat_id)
+    if not target_perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tujuan tidak ditemukan"
+        )
+
+    # Verify target perawat belongs to same puskesmas
+    if target_perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat tujuan bukan dari puskesmas Anda"
+        )
+
+    # Cannot transfer to same perawat
+    if source_perawat_id == payload.target_perawat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tidak dapat memindahkan pasien ke perawat yang sama"
+        )
+
+    # Check target perawat is active
+    if not target_perawat.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Perawat tujuan tidak aktif"
+        )
+
+    # Get all patients from source perawat
+    patients = crud_ibu_hamil.get_by_perawat(db, perawat_id=source_perawat_id)
+    if not patients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Perawat sumber tidak memiliki pasien untuk dipindahkan"
+        )
+
+    transferred_ids = []
+    transferred_count = 0
+
+    # Transfer all patients
+    for patient in patients:
+        patient.perawat_id = payload.target_perawat_id
+        db.add(patient)
+        transferred_ids.append(patient.id)
+        transferred_count += 1
+
+    # Update workload counters
+    source_perawat.current_patients = 0
+    target_perawat.current_patients = (target_perawat.current_patients or 0) + transferred_count
+
+    db.add(source_perawat)
+    db.add(target_perawat)
+
+    try:
+        db.commit()
+        db.refresh(source_perawat)
+        db.refresh(target_perawat)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal memindahkan pasien: {str(e)}"
+        )
+
+    return TransferPatientResponse(
+        success=True,
+        message=f"Berhasil memindahkan {transferred_count} pasien dari {source_perawat.nama_lengkap} ke {target_perawat.nama_lengkap}",
+        transferred_count=transferred_count,
+        source_perawat=TransferPerawatInfo(
+            id=source_perawat.id,
+            nama_lengkap=source_perawat.nama_lengkap,
+            current_patients=source_perawat.current_patients or 0
+        ),
+        target_perawat=TransferPerawatInfo(
+            id=target_perawat.id,
+            nama_lengkap=target_perawat.nama_lengkap,
+            current_patients=target_perawat.current_patients or 0
+        ),
+        transferred_patients=transferred_ids
+    )
+
+
+@router.post(
+    "/{source_perawat_id}/transfer-patient",
+    response_model=TransferPatientResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Transfer satu pasien ke perawat lain",
+    description="""
+Transfer satu pasien (ibu hamil) dari satu perawat ke perawat lain.
+
+## Kegunaan
+- Menyeimbangkan beban kerja antar perawat
+- Memindahkan pasien sesuai kebutuhan spesifik
+
+## Validasi
+- Kedua perawat harus dari puskesmas yang sama
+- Pasien harus sedang ditangani oleh perawat sumber
+- Perawat tujuan harus aktif
+- Hanya admin puskesmas yang dapat melakukan transfer
+
+## Efek
+- `ibu_hamil.perawat_id` akan diubah ke perawat tujuan
+- `current_patients` perawat sumber akan berkurang 1
+- `current_patients` perawat tujuan akan bertambah 1
+    """,
+)
+def transfer_single_patient(
+    source_perawat_id: int,
+    payload: TransferSinglePatientRequest,
+    current_user: User = Depends(require_role("puskesmas")),
+    db: Session = Depends(get_db),
+) -> TransferPatientResponse:
+    """Transfer a single patient from one perawat to another."""
+    # Get puskesmas for current admin
+    puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
+    if not puskesmas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Puskesmas tidak ditemukan untuk user ini"
+        )
+
+    # Get source perawat
+    source_perawat = crud_perawat.get(db, source_perawat_id)
+    if not source_perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat sumber tidak ditemukan"
+        )
+
+    # Verify source perawat belongs to this puskesmas
+    if source_perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat sumber bukan dari puskesmas Anda"
+        )
+
+    # Get target perawat
+    target_perawat = crud_perawat.get(db, payload.target_perawat_id)
+    if not target_perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Perawat tujuan tidak ditemukan"
+        )
+
+    # Verify target perawat belongs to same puskesmas
+    if target_perawat.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Perawat tujuan bukan dari puskesmas Anda"
+        )
+
+    # Cannot transfer to same perawat
+    if source_perawat_id == payload.target_perawat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tidak dapat memindahkan pasien ke perawat yang sama"
+        )
+
+    # Check target perawat is active
+    if not target_perawat.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Perawat tujuan tidak aktif"
+        )
+
+    # Get the patient
+    patient = crud_ibu_hamil.get(db, payload.ibu_hamil_id)
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pasien tidak ditemukan"
+        )
+
+    # Verify patient is currently assigned to source perawat
+    if patient.perawat_id != source_perawat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pasien tidak sedang ditangani oleh perawat sumber"
+        )
+
+    # Verify patient belongs to same puskesmas
+    if patient.puskesmas_id != puskesmas.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Pasien bukan dari puskesmas Anda"
+        )
+
+    # Transfer patient
+    patient.perawat_id = payload.target_perawat_id
+    db.add(patient)
+
+    # Update workload counters
+    source_perawat.current_patients = max(0, (source_perawat.current_patients or 0) - 1)
+    target_perawat.current_patients = (target_perawat.current_patients or 0) + 1
+
+    db.add(source_perawat)
+    db.add(target_perawat)
+
+    try:
+        db.commit()
+        db.refresh(source_perawat)
+        db.refresh(target_perawat)
+        db.refresh(patient)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal memindahkan pasien: {str(e)}"
+        )
+
+    return TransferPatientResponse(
+        success=True,
+        message=f"Berhasil memindahkan 1 pasien dari {source_perawat.nama_lengkap} ke {target_perawat.nama_lengkap}",
+        transferred_count=1,
+        source_perawat=TransferPerawatInfo(
+            id=source_perawat.id,
+            nama_lengkap=source_perawat.nama_lengkap,
+            current_patients=source_perawat.current_patients or 0
+        ),
+        target_perawat=TransferPerawatInfo(
+            id=target_perawat.id,
+            nama_lengkap=target_perawat.nama_lengkap,
+            current_patients=target_perawat.current_patients or 0
+        ),
+        transferred_patients=[patient.id]
+    )
