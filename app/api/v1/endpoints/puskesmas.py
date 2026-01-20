@@ -546,16 +546,56 @@ Mendapatkan statistik dashboard puskesmas yang sedang login.
 **Akses:**
 - Admin puskesmas (role: 'puskesmas')
 
-**Response:**
+**Response Fields:**
 - puskesmas_id: ID puskesmas
 - puskesmas_name: Nama puskesmas
-- total_perawat: Total perawat terdaftar di puskesmas
-- total_ibu_hamil: Total ibu hamil terdaftar di puskesmas
+- total_perawat: Total perawat aktif terdaftar di puskesmas
+- total_ibu_hamil: Total ibu hamil aktif terdaftar di puskesmas
 - pemeriksaan_hari_ini: Jumlah health record (pemeriksaan) untuk hari ini
 - pasien_belum_ditugaskan: Ibu hamil yang belum memiliki perawat
-- persentase_belum_ditugaskan: Persentase ibu hamil yang belum mendapatkan perawat
+- persentase_belum_ditugaskan: Persentase ibu hamil yang belum mendapatkan perawat (0-100)
 - distribusi_risiko: Distribusi risiko ibu hamil (dummy data untuk saat ini)
 """,
+    responses={
+        200: {
+            "description": "Statistik dashboard puskesmas berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "puskesmas_id": 1,
+                        "puskesmas_name": "Puskesmas Sungai Penuh",
+                        "total_perawat": 5,
+                        "total_ibu_hamil": 25,
+                        "pemeriksaan_hari_ini": 3,
+                        "pasien_belum_ditugaskan": 8,
+                        "persentase_belum_ditugaskan": 32.0,
+                        "distribusi_risiko": {
+                            "rendah": 15,
+                            "sedang": 7,
+                            "tinggi": 3,
+                            "note": "Data dummy - implementasi risk level belum tersedia"
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan admin puskesmas",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not enough permissions. Required role(s): puskesmas"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan untuk user ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas tidak ditemukan untuk akun ini"}
+                }
+            }
+        }
+    }
 )
 async def get_my_puskesmas_statistics(
     current_user: User = Depends(require_role("puskesmas")),
