@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from app.schemas.user import UserResponse
 
 
-RISK_LEVELS = {"low", "normal", "high"}
+RISK_LEVELS = {"rendah", "sedang", "tinggi"}
 ASSIGNMENT_METHODS = {"auto", "manual"}
 
 
@@ -145,7 +145,7 @@ class IbuHamilBase(BaseModel):
     # Optional fields
     age: Optional[int] = None
     blood_type: Optional[str] = None
-    risk_level: Optional[str] = "normal"
+    risk_level: Optional[str] = None  # rendah, sedang, tinggi (ditentukan oleh perawat)
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = True
     data_sharing_consent: Optional[bool] = False
@@ -202,7 +202,7 @@ class IbuHamilBase(BaseModel):
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
             "emergency_contact_relation": "Suami",
-            "risk_level": "normal",
+            "risk_level": "sedang",
             "healthcare_preference": "puskesmas",
             "whatsapp_consent": True,
             "data_sharing_consent": False,
@@ -288,7 +288,7 @@ class IbuHamilUpdate(BaseModel):
         "example": {
             "perawat_id": 2,
             "location": (101.4, -2.1),
-            "risk_level": "high",
+            "risk_level": "tinggi",
         }
     })
 
@@ -348,8 +348,12 @@ class IbuHamilResponse(BaseModel):
     penyakit_ginjal: Optional[bool] = None
     tbc_malaria: Optional[bool] = None
     
-    # Risk & Assignment
-    risk_level: Optional[str] = None
+    # Risk Assessment (ditentukan oleh perawat)
+    risk_level: Optional[str] = None  # rendah, sedang, tinggi
+    risk_level_set_by: Optional[int] = None  # ID perawat yang menentukan
+    risk_level_set_at: Optional[datetime] = None  # Waktu penentuan risiko
+
+    # Assignment
     assignment_date: Optional[datetime] = None
     assignment_distance_km: Optional[float] = None
     assignment_method: Optional[str] = None

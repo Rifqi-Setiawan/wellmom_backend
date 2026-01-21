@@ -22,7 +22,7 @@ class PerawatBase(BaseModel):
     puskesmas_id: int = Field(..., gt=0)
     nama_lengkap: str = Field(..., min_length=3, max_length=255)
     email: EmailStr
-    nomor_hp: str = Field(..., pattern=r'^\+?[0-9]{10,15}$')
+    nomor_hp: str = Field(..., min_length=10, max_length=20)
     nip: str = Field(..., min_length=5, max_length=50)
     is_active: bool = Field(default=True)
     profile_photo_url: Optional[str] = Field(None, max_length=500)
@@ -32,7 +32,9 @@ class PerawatBase(BaseModel):
     def validate_phone(cls, v: str) -> str:
         cleaned = v.replace(' ', '').replace('-', '')
         if not cleaned.replace('+', '').isdigit():
-            raise ValueError('Phone must contain only numbers')
+            raise ValueError('Nomor HP hanya boleh berisi angka')
+        if len(cleaned) < 10 or len(cleaned) > 15:
+            raise ValueError('Nomor HP harus 10-15 digit')
         return cleaned
 
     model_config = ConfigDict(json_schema_extra={
@@ -62,16 +64,21 @@ class PerawatGenerate(BaseModel):
     Akun langsung aktif tanpa proses aktivasi email.
     """
     nama_lengkap: str = Field(..., min_length=3, max_length=255, description="Nama lengkap perawat")
-    nomor_hp: str = Field(..., pattern=r'^\+?[0-9]{10,15}$', description="Nomor HP perawat")
+    nomor_hp: str = Field(..., min_length=10, max_length=20, description="Nomor HP perawat (format: 08xx atau +628xx)")
     nip: str = Field(..., min_length=5, max_length=50, description="NIP perawat (juga digunakan sebagai password awal)")
     email: EmailStr = Field(..., description="Email aktif perawat untuk login")
 
     @field_validator('nomor_hp')
     @classmethod
     def validate_phone(cls, v: str) -> str:
+        # Bersihkan spasi dan dash terlebih dahulu
         cleaned = v.replace(' ', '').replace('-', '')
+        # Validasi hanya angka (dan optional + di depan)
         if not cleaned.replace('+', '').isdigit():
             raise ValueError('Nomor HP hanya boleh berisi angka')
+        # Validasi panjang setelah dibersihkan
+        if len(cleaned) < 10 or len(cleaned) > 15:
+            raise ValueError('Nomor HP harus 10-15 digit')
         return cleaned
 
     model_config = ConfigDict(json_schema_extra={
@@ -80,6 +87,37 @@ class PerawatGenerate(BaseModel):
             "nomor_hp": "+6281234567890",
             "nip": "198501012015011001",
             "email": "siti.nurhaliza@puskesmas.go.id"
+        }
+    })
+
+
+class PerawatGenerateResponse(BaseModel):
+    """Response schema untuk pembuatan akun perawat baru."""
+    user_id: int = Field(..., description="ID user yang dibuat")
+    perawat_id: int = Field(..., description="ID perawat yang dibuat")
+    nama_lengkap: str = Field(..., description="Nama lengkap perawat")
+    email: str = Field(..., description="Email perawat untuk login")
+    nomor_hp: str = Field(..., description="Nomor HP perawat")
+    nip: str = Field(..., description="NIP perawat (juga sebagai password awal)")
+    puskesmas_id: int = Field(..., description="ID puskesmas tempat perawat terdaftar")
+    puskesmas_name: str = Field(..., description="Nama puskesmas")
+    is_active: bool = Field(..., description="Status aktif akun")
+    login_url: str = Field(..., description="URL untuk login perawat")
+    message: str = Field(..., description="Pesan sukses")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "user_id": 10,
+            "perawat_id": 5,
+            "nama_lengkap": "Siti Nurhaliza",
+            "email": "siti.nurhaliza@puskesmas.go.id",
+            "nomor_hp": "+6281234567890",
+            "nip": "198501012015011001",
+            "puskesmas_id": 1,
+            "puskesmas_name": "Puskesmas Hamparan Pugu",
+            "is_active": True,
+            "login_url": "https://wellmom.example.com/perawat/login",
+            "message": "Akun perawat berhasil dibuat dan langsung aktif. Password awal adalah NIP. Perawat dapat langsung login."
         }
     })
 
@@ -161,11 +199,11 @@ class PerawatUpdate(BaseModel):
     """Schema untuk update data perawat"""
     nama_lengkap: Optional[str] = Field(None, min_length=3, max_length=255)
     email: Optional[EmailStr] = None
-    nomor_hp: Optional[str] = Field(None, pattern=r'^\+?[0-9]{10,15}$')
+    nomor_hp: Optional[str] = Field(None, min_length=10, max_length=20)
     nip: Optional[str] = Field(None, min_length=5, max_length=50)
     is_active: Optional[bool] = None
     profile_photo_url: Optional[str] = Field(None, max_length=500)
-    
+
     @field_validator('nomor_hp')
     @classmethod
     def validate_phone(cls, v: Optional[str]) -> Optional[str]:
@@ -173,7 +211,9 @@ class PerawatUpdate(BaseModel):
             return v
         cleaned = v.replace(' ', '').replace('-', '')
         if not cleaned.replace('+', '').isdigit():
-            raise ValueError('Phone must contain only numbers')
+            raise ValueError('Nomor HP hanya boleh berisi angka')
+        if len(cleaned) < 10 or len(cleaned) > 15:
+            raise ValueError('Nomor HP harus 10-15 digit')
         return cleaned
 
     model_config = ConfigDict(json_schema_extra={
@@ -423,5 +463,61 @@ class MyNursesResponse(BaseModel):
                     "updated_at": "2025-01-06T10:00:00"
                 }
             ]
+        }
+    })
+
+
+# ============================================
+# RISK LEVEL SCHEMAS
+# ============================================
+RISK_LEVELS = {"rendah", "sedang", "tinggi"}
+
+
+class SetRiskLevelRequest(BaseModel):
+    """Schema untuk menentukan tingkat risiko kehamilan oleh perawat.
+
+    Tingkat risiko:
+    - rendah: Kehamilan dengan risiko rendah
+    - sedang: Kehamilan dengan risiko sedang
+    - tinggi: Kehamilan dengan risiko tinggi
+    """
+    risk_level: str = Field(..., description="Tingkat risiko kehamilan: rendah, sedang, atau tinggi")
+
+    @field_validator('risk_level')
+    @classmethod
+    def validate_risk_level(cls, v: str) -> str:
+        v_lower = v.lower().strip()
+        if v_lower not in RISK_LEVELS:
+            raise ValueError(f"Tingkat risiko harus salah satu dari: {', '.join(sorted(RISK_LEVELS))}")
+        return v_lower
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "risk_level": "sedang"
+        }
+    })
+
+
+class SetRiskLevelResponse(BaseModel):
+    """Response untuk endpoint set risk level."""
+    success: bool
+    message: str
+    ibu_hamil_id: int
+    ibu_hamil_nama: str
+    risk_level: str
+    risk_level_set_by: int = Field(..., description="ID perawat yang menentukan")
+    risk_level_set_by_nama: str = Field(..., description="Nama perawat yang menentukan")
+    risk_level_set_at: datetime = Field(..., description="Waktu penentuan risiko")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "success": True,
+            "message": "Tingkat risiko kehamilan berhasil ditentukan",
+            "ibu_hamil_id": 10,
+            "ibu_hamil_nama": "Siti Aminah",
+            "risk_level": "sedang",
+            "risk_level_set_by": 1,
+            "risk_level_set_by_nama": "Siti Nurhaliza",
+            "risk_level_set_at": "2026-01-21T10:30:00"
         }
     })

@@ -58,8 +58,10 @@ class IbuHamil(Base):
     penyakit_ginjal = Column(Boolean, default=False)
     tbc_malaria = Column(Boolean, default=False)
     
-    # Risk Assessment
-    risk_level = Column(String(20), default='normal', index=True)
+    # Risk Assessment (ditentukan oleh perawat)
+    risk_level = Column(String(20), nullable=True, index=True)  # rendah, sedang, tinggi (null jika belum ditentukan)
+    risk_level_set_by = Column(Integer, ForeignKey("perawat.id", ondelete="SET NULL"), nullable=True)  # Perawat yang menentukan
+    risk_level_set_at = Column(TIMESTAMP, nullable=True)  # Waktu penentuan risiko
     
     # Assignment Info
     assignment_date = Column(TIMESTAMP)
@@ -80,7 +82,7 @@ class IbuHamil(Base):
     
     # Constraints
     __table_args__ = (
-        CheckConstraint("risk_level IN ('low', 'normal', 'high')", name="check_risk_level"),
+        CheckConstraint("risk_level IS NULL OR risk_level IN ('rendah', 'sedang', 'tinggi')", name="check_risk_level"),
         CheckConstraint("assignment_method IN ('auto', 'manual')", name="check_assignment_method"),
     )
     
@@ -89,3 +91,4 @@ class IbuHamil(Base):
     puskesmas = relationship("Puskesmas", foreign_keys=[puskesmas_id])
     perawat = relationship("Perawat", back_populates="ibu_hamil_list", foreign_keys=[perawat_id])
     assigned_by = relationship("User", foreign_keys=[assigned_by_user_id])
+    risk_assessor = relationship("Perawat", foreign_keys=[risk_level_set_by])  # Perawat yang menentukan risiko

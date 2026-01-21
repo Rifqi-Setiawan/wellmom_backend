@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text  
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db, engine
@@ -44,6 +46,34 @@ app.add_middleware(
 upload_dir = Path(settings.UPLOAD_DIR)
 upload_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(upload_dir)), name="uploads")
+
+
+# Custom validation error handler untuk menampilkan detail error yang lebih jelas
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handler untuk menampilkan detail error validasi dengan format yang lebih jelas.
+    Berguna untuk debugging saat request body tidak sesuai schema.
+    """
+    errors = []
+    for error in exc.errors():
+        field_path = " -> ".join(str(loc) for loc in error["loc"])
+        errors.append({
+            "field": field_path,
+            "message": error["msg"],
+            "type": error["type"],
+            "input": error.get("input")
+        })
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Validation Error",
+            "errors": errors,
+            "hint": "Periksa format data yang dikirim. Lihat field 'errors' untuk detail."
+        }
+    )
+
 
 # Include versioned API router
 app.include_router(api_router)

@@ -11,7 +11,7 @@ Notes:
 - Password awal menggunakan NIP, perawat disarankan ganti setelah login pertama.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,6 +26,7 @@ from app.models.perawat import Perawat as PerawatModel
 from app.schemas.perawat import (
     PerawatResponse,
     PerawatGenerate,
+    PerawatGenerateResponse,
     PerawatUpdate,
     PerawatLoginRequest,
     PerawatLoginResponse,
@@ -38,6 +39,8 @@ from app.schemas.perawat import (
     TransferPerawatInfo,
     MyNursesResponse,
     MyNurseItem,
+    SetRiskLevelRequest,
+    SetRiskLevelResponse,
 )
 from app.schemas.user import UserCreate
 
@@ -58,33 +61,107 @@ def _build_login_url() -> str:
 
 @router.post(
     "/generate",
+    response_model=PerawatGenerateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Puskesmas membuat akun perawat baru",
     description="""
 Membuat akun perawat baru oleh Puskesmas. Akun langsung aktif tanpa proses aktivasi email.
 
+## Autentikasi
+- Membutuhkan token dengan role `puskesmas`
+
 ## Request Body
-- **nama_lengkap**: Nama lengkap perawat
-- **nomor_hp**: Nomor HP perawat (format: +62xxx atau 08xxx)
-- **nip**: NIP perawat (juga digunakan sebagai password awal)
-- **email**: Email aktif perawat untuk login
+| Field | Tipe | Validasi | Keterangan |
+|-------|------|----------|------------|
+| `nama_lengkap` | string | Min 3, Max 255 karakter | Nama lengkap perawat |
+| `nomor_hp` | string | 10-15 digit, boleh diawali + | Format: `081234567890` atau `+6281234567890` |
+| `nip` | string | Min 5, Max 50 karakter | NIP perawat (juga sebagai password awal) |
+| `email` | string | Format email valid | Email aktif untuk login |
+
+## Validasi Nomor HP
+- Spasi dan dash otomatis dihapus
+- Harus berisi angka saja (boleh diawali +)
+- Panjang 10-15 digit setelah dibersihkan
+- Contoh valid: `081234567890`, `+6281234567890`, `0812 3456 7890`
 
 ## Flow
 1. Puskesmas memasukkan data lengkap perawat
-2. Sistem membuat akun user dan perawat (langsung aktif)
-3. Password otomatis menggunakan NIP
-4. Perawat dapat langsung login dengan email + NIP sebagai password
-5. Perawat disarankan untuk mengubah password setelah login pertama
+2. Sistem memvalidasi uniqueness (email, NIP, nomor HP)
+3. Sistem membuat akun user dan perawat (langsung aktif)
+4. Password otomatis menggunakan NIP
+5. Perawat dapat langsung login dengan email + NIP sebagai password
 
-## Response
-Mengembalikan informasi akun yang dibuat.
+## Error Responses
+| Status | Keterangan |
+|--------|------------|
+| 400 | Email/NIP/Nomor HP sudah terdaftar |
+| 401 | Token tidak valid atau expired |
+| 403 | User bukan role puskesmas |
+| 404 | Profil puskesmas tidak ditemukan |
+| 422 | Data tidak sesuai validasi (lihat detail error) |
+
+## Contoh Error 422
+```json
+{
+  "detail": "Validation Error",
+  "errors": [
+    {
+      "field": "body -> nomor_hp",
+      "message": "Nomor HP harus 10-15 digit",
+      "type": "value_error"
+    }
+  ],
+  "hint": "Periksa format data yang dikirim."
+}
+```
     """,
+    responses={
+        201: {
+            "description": "Akun perawat berhasil dibuat",
+            "model": PerawatGenerateResponse
+        },
+        400: {
+            "description": "Email/NIP/Nomor HP sudah terdaftar",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Email sudah terdaftar"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil puskesmas tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas profile not found for this user"}
+                }
+            }
+        },
+        422: {
+            "description": "Validation error - data tidak sesuai format",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Validation Error",
+                        "errors": [
+                            {
+                                "field": "body -> nomor_hp",
+                                "message": "Nomor HP harus 10-15 digit",
+                                "type": "value_error",
+                                "input": "0812"
+                            }
+                        ],
+                        "hint": "Periksa format data yang dikirim."
+                    }
+                }
+            }
+        }
+    }
 )
 def generate_perawat_account(
     payload: PerawatGenerate,
     current_user: User = Depends(require_role("puskesmas")),
     db: Session = Depends(get_db),
-) -> dict:
+) -> PerawatGenerateResponse:
     """Puskesmas creates a nurse account. Account is immediately active. Password = NIP."""
     puskesmas = crud_puskesmas.get_by_admin_user_id(db, admin_user_id=current_user.id)
     if not puskesmas:
@@ -133,19 +210,19 @@ def generate_perawat_account(
     db.commit()
     db.refresh(perawat)
 
-    return {
-        "user_id": user.id,
-        "perawat_id": perawat.id,
-        "nama_lengkap": payload.nama_lengkap,
-        "email": payload.email,
-        "nomor_hp": payload.nomor_hp,
-        "nip": payload.nip,
-        "puskesmas_id": puskesmas.id,
-        "puskesmas_name": puskesmas.name,
-        "is_active": True,
-        "login_url": _build_login_url(),
-        "message": "Akun perawat berhasil dibuat dan langsung aktif. Password awal adalah NIP. Perawat dapat langsung login.",
-    }
+    return PerawatGenerateResponse(
+        user_id=user.id,
+        perawat_id=perawat.id,
+        nama_lengkap=payload.nama_lengkap,
+        email=payload.email,
+        nomor_hp=payload.nomor_hp,
+        nip=payload.nip,
+        puskesmas_id=puskesmas.id,
+        puskesmas_name=puskesmas.name,
+        is_active=True,
+        login_url=_build_login_url(),
+        message="Akun perawat berhasil dibuat dan langsung aktif. Password awal adalah NIP. Perawat dapat langsung login.",
+    )
 
 
 @router.post(
@@ -856,4 +933,144 @@ def transfer_single_patient(
             current_patients=target_perawat.current_patients or 0
         ),
         transferred_patients=[patient.id]
+    )
+
+
+@router.patch(
+    "/me/patients/{ibu_hamil_id}/risk-level",
+    response_model=SetRiskLevelResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Tentukan tingkat risiko kehamilan ibu hamil",
+    description="""
+Endpoint untuk perawat menentukan tingkat risiko kehamilan seorang ibu hamil yang terdaftar pada perawat tersebut.
+
+## Autentikasi
+- Membutuhkan token dengan role `perawat`
+
+## Persyaratan
+- Ibu hamil harus terdaftar pada perawat yang sedang login (perawat_id pada ibu hamil harus sama dengan perawat yang login)
+- Ibu hamil harus aktif
+
+## Tingkat Risiko
+| Level | Keterangan |
+|-------|------------|
+| `rendah` | Kehamilan dengan risiko rendah |
+| `sedang` | Kehamilan dengan risiko sedang |
+| `tinggi` | Kehamilan dengan risiko tinggi |
+
+## Efek
+- Field `risk_level` pada ibu hamil akan diupdate
+- Field `risk_level_set_by` akan diisi dengan ID perawat
+- Field `risk_level_set_at` akan diisi dengan waktu saat ini
+
+## Error Responses
+| Status | Keterangan |
+|--------|------------|
+| 400 | Tingkat risiko tidak valid |
+| 401 | Token tidak valid atau expired |
+| 403 | Ibu hamil tidak terdaftar pada perawat ini |
+| 404 | Perawat atau ibu hamil tidak ditemukan |
+    """,
+    responses={
+        200: {
+            "description": "Tingkat risiko berhasil ditentukan",
+            "model": SetRiskLevelResponse
+        },
+        400: {
+            "description": "Tingkat risiko tidak valid",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Tingkat risiko harus salah satu dari: rendah, sedang, tinggi"}
+                }
+            }
+        },
+        403: {
+            "description": "Ibu hamil tidak terdaftar pada perawat ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Anda tidak memiliki akses untuk mengubah data ibu hamil ini. Ibu hamil tidak terdaftar pada Anda."}
+                }
+            }
+        },
+        404: {
+            "description": "Data tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Ibu hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+def set_patient_risk_level(
+    ibu_hamil_id: int,
+    payload: SetRiskLevelRequest,
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> SetRiskLevelResponse:
+    """Perawat menentukan tingkat risiko kehamilan ibu hamil yang terdaftar padanya."""
+    # Get perawat profile for current user
+    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini"
+        )
+
+    # Check perawat is active
+    if not perawat.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun perawat tidak aktif"
+        )
+
+    # Get ibu hamil
+    ibu_hamil = crud_ibu_hamil.get(db, ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu hamil tidak ditemukan"
+        )
+
+    # Check ibu hamil is active
+    if not ibu_hamil.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ibu hamil tidak aktif"
+        )
+
+    # Verify ibu hamil is assigned to this perawat
+    if ibu_hamil.perawat_id != perawat.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki akses untuk mengubah data ibu hamil ini. Ibu hamil tidak terdaftar pada Anda."
+        )
+
+    # Update risk level
+    current_time = datetime.utcnow()
+    ibu_hamil.risk_level = payload.risk_level
+    ibu_hamil.risk_level_set_by = perawat.id
+    ibu_hamil.risk_level_set_at = current_time
+
+    db.add(ibu_hamil)
+
+    try:
+        db.commit()
+        db.refresh(ibu_hamil)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengupdate tingkat risiko: {str(e)}"
+        )
+
+    return SetRiskLevelResponse(
+        success=True,
+        message="Tingkat risiko kehamilan berhasil ditentukan",
+        ibu_hamil_id=ibu_hamil.id,
+        ibu_hamil_nama=ibu_hamil.nama_lengkap,
+        risk_level=ibu_hamil.risk_level,
+        risk_level_set_by=perawat.id,
+        risk_level_set_by_nama=perawat.nama_lengkap,
+        risk_level_set_at=current_time
     )
