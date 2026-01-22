@@ -29,12 +29,12 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         self, db: Session, *, obj_in: IbuHamilCreate, user_id: int
     ) -> IbuHamil:
         """Create Ibu Hamil with PostGIS location conversion.
-        
+
         Args:
             db: Database session
             obj_in: IbuHamilCreate schema with location as tuple (lon, lat)
             user_id: User ID to link to
-            
+
         Returns:
             Created IbuHamil instance
         """
@@ -42,6 +42,8 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         obj_data = obj_in.model_dump(exclude={"location"})
         # Ensure profile photo is not set during registration
         obj_data.pop("profile_photo_url", None)
+        # Ensure risk_level is NULL during registration (will be set by perawat later)
+        obj_data.pop("risk_level", None)
 
         # Flatten nested riwayat_kesehatan_ibu -> individual boolean columns
         riwayat = obj_data.pop("riwayat_kesehatan_ibu", None) or {}

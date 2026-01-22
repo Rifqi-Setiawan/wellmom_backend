@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 RISK_LEVELS = {"rendah", "sedang", "tinggi"}
 ASSIGNMENT_METHODS = {"auto", "manual"}
+VALID_BLOOD_TYPES = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"}
 
 
 # ============================================================================
@@ -104,16 +105,35 @@ class RiwayatKesehatanIbu(BaseModel):
 
 
 class IbuHamilBase(BaseModel):
-    """Base schema for IbuHamil - common fields for input/output
-    
-    NOTE: user_id is NOT here because it's set programmatically, not user input
+    """
+    Base schema for IbuHamil - common fields for input/output.
+
+    NOTE:
+    - user_id is NOT here because it's set programmatically, not user input
+    - risk_level akan diabaikan saat registrasi (ditentukan oleh perawat setelah assessment)
+    - profile_photo_url akan diabaikan saat registrasi (upload via endpoint terpisah)
+
+    Field Wajib:
+    - nama_lengkap: Nama lengkap ibu hamil
+    - nik: NIK 16 digit (harus unik)
+    - date_of_birth: Tanggal lahir
+    - address: Alamat lengkap
+    - location: Koordinat [longitude, latitude]
+    - emergency_contact_name: Nama kontak darurat
+    - emergency_contact_phone: Nomor telepon kontak darurat (8-15 digit)
+
+    Field Opsional:
+    - Data kehamilan (usia_kehamilan, kehamilan_ke, jumlah_anak, dll)
+    - Riwayat kesehatan (riwayat_kesehatan_ibu)
+    - Data demografis (age, blood_type)
+    - Preferensi (healthcare_preference, whatsapp_consent, data_sharing_consent)
     """
     # Identitas Pribadi
     nama_lengkap: str
     nik: str
     date_of_birth: date
-    profile_photo_url: Optional[str] = None  # Foto profil ibu hamil
-    
+    profile_photo_url: Optional[str] = None  # Foto profil (diabaikan saat registrasi)
+
     # Alamat & Lokasi
     address: str
     location: Tuple[float, float]  # (longitude, latitude)
@@ -121,7 +141,7 @@ class IbuHamilBase(BaseModel):
     kota_kabupaten: Optional[str] = None
     kelurahan: Optional[str] = None
     kecamatan: Optional[str] = None
-    
+
     # Data Kehamilan
     last_menstrual_period: Optional[date] = None  # HPHT
     estimated_due_date: Optional[date] = None  # HPL
@@ -133,19 +153,19 @@ class IbuHamilBase(BaseModel):
     previous_pregnancy_complications: Optional[str] = None  # Komplikasi kehamilan sebelumnya
     pernah_caesar: bool = False  # Pernah Caesar
     pernah_perdarahan_saat_hamil: bool = False  # Pernah perdarahan saat hamil
-    
+
     # Riwayat Kesehatan Ibu
     riwayat_kesehatan_ibu: RiwayatKesehatanIbu = RiwayatKesehatanIbu()
-    
+
     # Kontak Darurat
     emergency_contact_name: str
     emergency_contact_phone: str
     emergency_contact_relation: Optional[str] = None
-    
+
     # Optional fields
     age: Optional[int] = None
-    blood_type: Optional[str] = None
-    risk_level: Optional[str] = None  # rendah, sedang, tinggi (ditentukan oleh perawat)
+    blood_type: Optional[str] = None  # A+, A-, B+, B-, AB+, AB-, O+, O-
+    risk_level: Optional[str] = None  # DIABAIKAN saat registrasi! Ditentukan oleh perawat (rendah/sedang/tinggi)
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = True
     data_sharing_consent: Optional[bool] = False
@@ -167,6 +187,21 @@ class IbuHamilBase(BaseModel):
             raise ValueError(f"Risk level must be one of {sorted(RISK_LEVELS)}")
         return v
 
+    @field_validator("blood_type")
+    @classmethod
+    def validate_blood_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in VALID_BLOOD_TYPES:
+            raise ValueError(f"Blood type must be one of {sorted(VALID_BLOOD_TYPES)}")
+        return v
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def validate_emergency_phone(cls, v: str) -> str:
+        import re
+        if not re.match(r"^\+?\d{8,15}$", v):
+            raise ValueError("Emergency contact phone must be 8-15 digits, optional leading '+'")
+        return v
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "nama_lengkap": "Siti Aminah",
@@ -179,7 +214,7 @@ class IbuHamilBase(BaseModel):
             "kota_kabupaten": "Kerinci",
             "kelurahan": "Sungai Penuh",
             "kecamatan": "Pesisir Bukit",
-            "location": (101.3912, -2.0645),
+            "location": [101.3912, -2.0645],
             "last_menstrual_period": "2024-12-01",
             "estimated_due_date": "2025-09-08",
             "usia_kehamilan": 8,
@@ -197,23 +232,30 @@ class IbuHamilBase(BaseModel):
                 "penyakit_jantung": False,
                 "asma": False,
                 "penyakit_ginjal": False,
-                "tbc_malaria": False,
+                "tbc_malaria": False
             },
             "emergency_contact_name": "Budi (Suami)",
             "emergency_contact_phone": "+6281234567890",
             "emergency_contact_relation": "Suami",
-            "risk_level": "sedang",
             "healthcare_preference": "puskesmas",
             "whatsapp_consent": True,
-            "data_sharing_consent": False,
+            "data_sharing_consent": False
         }
     })
 
 
 class IbuHamilCreate(IbuHamilBase):
-    """Schema for creating new IbuHamil
-    
-    NOTE: user_id is passed separately to CRUD method, not in schema!
+    """
+    Schema untuk membuat profil ibu hamil baru (registrasi).
+
+    Digunakan sebagai bagian dari IbuHamilRegisterRequest.
+
+    CATATAN PENTING:
+    - user_id di-set secara programatik, bukan dari input user
+    - risk_level akan DIABAIKAN saat registrasi (di-set ke NULL)
+    - profile_photo_url akan DIABAIKAN saat registrasi
+
+    Risk level akan ditentukan oleh perawat setelah melakukan assessment kesehatan.
     """
     pass  # Inherits all from Base, no additional fields needed for creation
 
@@ -284,6 +326,23 @@ class IbuHamilUpdate(BaseModel):
             raise ValueError(f"Assignment method must be one of {sorted(ASSIGNMENT_METHODS)}")
         return v
 
+    @field_validator("blood_type")
+    @classmethod
+    def validate_blood_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in VALID_BLOOD_TYPES:
+            raise ValueError(f"Blood type must be one of {sorted(VALID_BLOOD_TYPES)}")
+        return v
+
+    @field_validator("emergency_contact_phone")
+    @classmethod
+    def validate_emergency_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        import re
+        if not re.match(r"^\+?\d{8,15}$", v):
+            raise ValueError("Emergency contact phone must be 8-15 digits, optional leading '+'")
+        return v
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "perawat_id": 2,
@@ -351,6 +410,7 @@ class IbuHamilResponse(BaseModel):
     # Risk Assessment (ditentukan oleh perawat)
     risk_level: Optional[str] = None  # rendah, sedang, tinggi
     risk_level_set_by: Optional[int] = None  # ID perawat yang menentukan
+    risk_level_set_by_name: Optional[str] = None  # Nama perawat yang menentukan
     risk_level_set_at: Optional[datetime] = None  # Waktu penentuan risiko
 
     # Assignment
@@ -402,21 +462,71 @@ class IbuHamilResponse(BaseModel):
             return list(location)
         return None
 
+    @field_validator('risk_level_set_by_name', mode='before')
+    @classmethod
+    def extract_risk_assessor_name(cls, v: Any, info) -> Optional[str]:
+        """Extract risk assessor name from relationship if available"""
+        if v is not None:
+            return v
+        # Try to get from risk_assessor relationship via info.data
+        if hasattr(info, 'data') and info.data:
+            risk_assessor = info.data.get('risk_assessor')
+            if risk_assessor and hasattr(risk_assessor, 'nama_lengkap'):
+                return risk_assessor.nama_lengkap
+        return None
+
     model_config = ConfigDict(from_attributes=True, json_schema_extra={
         "example": {
             "id": 1,
             "user_id": 20,
+            "puskesmas_id": 1,
+            "perawat_id": 5,
+            "assigned_by_user_id": 10,
             "nama_lengkap": "Siti Aminah",
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
+            "age": 39,
+            "blood_type": "O+",
             "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_hamil_1_20250118_123456.jpg",
-            "puskesmas_id": 1,
-            "perawat_id": 1,
-            "location": [101.3912, -2.0645],
-            "address": "Jl. Mawar No. 10",
+            "last_menstrual_period": "2024-12-01",
+            "estimated_due_date": "2025-09-08",
+            "usia_kehamilan": 8,
+            "kehamilan_ke": 2,
+            "jumlah_anak": 1,
+            "miscarriage_number": 0,
+            "jarak_kehamilan_terakhir": "2 tahun",
+            "previous_pregnancy_complications": None,
+            "pernah_caesar": False,
+            "pernah_perdarahan_saat_hamil": False,
+            "address": "Jl. Mawar No. 10, RT 02 RW 05",
             "provinsi": "Jambi",
-            "created_at": "2025-01-01T10:00:00Z",
-            "updated_at": "2025-01-02T11:00:00Z",
+            "kota_kabupaten": "Kerinci",
+            "kelurahan": "Sungai Penuh",
+            "kecamatan": "Pesisir Bukit",
+            "location": [101.3912, -2.0645],
+            "emergency_contact_name": "Budi (Suami)",
+            "emergency_contact_phone": "+6281234567890",
+            "emergency_contact_relation": "Suami",
+            "darah_tinggi": False,
+            "diabetes": False,
+            "anemia": False,
+            "penyakit_jantung": False,
+            "asma": False,
+            "penyakit_ginjal": False,
+            "tbc_malaria": False,
+            "risk_level": "tinggi",
+            "risk_level_set_by": 5,
+            "risk_level_set_by_name": "Bidan Rina Wijaya",
+            "risk_level_set_at": "2026-01-20T10:30:00Z",
+            "assignment_date": "2026-01-15T08:00:00Z",
+            "assignment_distance_km": 2.5,
+            "assignment_method": "manual",
+            "healthcare_preference": "puskesmas",
+            "whatsapp_consent": True,
+            "data_sharing_consent": False,
+            "is_active": True,
+            "created_at": "2026-01-10T10:00:00Z",
+            "updated_at": "2026-01-20T10:30:00Z",
         }
     })
 

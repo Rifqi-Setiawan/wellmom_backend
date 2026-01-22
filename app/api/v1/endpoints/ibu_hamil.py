@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_active_user, get_db, require_role
 from app.core.security import create_access_token
@@ -49,11 +49,22 @@ router = APIRouter(
 
 
 class IbuHamilRegisterRequest(BaseModel):
-    """Payload to register pregnant woman and user (if new)."""
+    """
+    Payload untuk registrasi ibu hamil baru.
+
+    Request body terdiri dari 2 bagian:
+    - user: Data akun user (email, phone, password, full_name)
+    - ibu_hamil: Data profil ibu hamil (identitas, kehamilan, alamat, kontak darurat, riwayat kesehatan)
+
+    **Catatan Penting:**
+    - Field `role` pada user akan otomatis di-set ke "ibu_hamil" meskipun diisi nilai lain
+    - Field `risk_level` TIDAK boleh diisi saat registrasi (akan diabaikan). Risk level ditentukan oleh perawat setelah assessment
+    - Field `profile_photo_url` akan diabaikan saat registrasi
+    """
 
     user: UserCreate
     ibu_hamil: IbuHamilCreate
-    
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "user": {
@@ -97,7 +108,6 @@ class IbuHamilRegisterRequest(BaseModel):
                 },
                 "age": 39,
                 "blood_type": "O+",
-                "risk_level": "normal",
                 "healthcare_preference": "puskesmas",
                 "whatsapp_consent": True,
                 "data_sharing_consent": False
@@ -279,29 +289,115 @@ def _auto_assign_nearest(
     "/register",
     response_model=dict,
     status_code=status.HTTP_201_CREATED,
-    summary="Registrasi ibu hamil",
+    summary="Registrasi ibu hamil baru",
     description="""
-Registrasi ibu hamil baru.
+Endpoint untuk registrasi ibu hamil baru ke dalam sistem WellMom.
 
-**Flow Registrasi:**
-1. Membuat akun user (role: ibu_hamil) jika belum ada
-2. Membuat profil ibu hamil dengan data lengkap
-3. Generate access token untuk login otomatis
+## Flow Registrasi
+1. Validasi semua data input (NIK, phone, email, lokasi, dll)
+2. Membuat akun user dengan role `ibu_hamil`
+3. Membuat profil ibu hamil dengan data lengkap
+4. Generate access token untuk login otomatis
 
-**Langkah Selanjutnya (di frontend):**
-1. Setelah registrasi berhasil, panggil endpoint `/puskesmas/nearest` untuk mendapatkan list 5 puskesmas terdekat
-2. Ibu hamil memilih puskesmas dari list tersebut
-3. Panggil endpoint `/puskesmas/{puskesmas_id}/ibu-hamil/{ibu_id}/assign` untuk assign ke puskesmas yang dipilih
+## Field yang Wajib Diisi
+
+### Data User (`user`)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| phone | string | Nomor telepon (8-15 digit, boleh dengan awalan +) |
+| password | string | Password minimal 6 karakter |
+| full_name | string | Nama lengkap |
+
+### Data Ibu Hamil (`ibu_hamil`)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| nama_lengkap | string | Nama lengkap ibu hamil |
+| nik | string | NIK 16 digit (unik, tidak boleh duplikat) |
+| date_of_birth | date | Tanggal lahir (format: YYYY-MM-DD) |
+| address | string | Alamat lengkap |
+| location | array | Koordinat [longitude, latitude] |
+| emergency_contact_name | string | Nama kontak darurat |
+| emergency_contact_phone | string | Nomor telepon kontak darurat |
+
+## Field Opsional
+
+### Data User (`user`)
+- `email`: Email (opsional tapi disarankan untuk login via email)
+
+### Data Ibu Hamil (`ibu_hamil`)
+- `provinsi`, `kota_kabupaten`, `kelurahan`, `kecamatan`: Alamat administratif
+- `last_menstrual_period`: HPHT (Hari Pertama Haid Terakhir)
+- `estimated_due_date`: HPL (Hari Perkiraan Lahir)
+- `usia_kehamilan`: Usia kehamilan dalam minggu
+- `kehamilan_ke`: Kehamilan ke berapa (default: 1)
+- `jumlah_anak`: Jumlah anak yang sudah dilahirkan (default: 0)
+- `miscarriage_number`: Riwayat keguguran (default: 0)
+- `jarak_kehamilan_terakhir`: Jarak dengan kehamilan sebelumnya
+- `previous_pregnancy_complications`: Komplikasi kehamilan sebelumnya
+- `pernah_caesar`: Pernah persalinan caesar (default: false)
+- `pernah_perdarahan_saat_hamil`: Pernah perdarahan saat hamil (default: false)
+- `riwayat_kesehatan_ibu`: Object berisi riwayat kesehatan (darah_tinggi, diabetes, anemia, dll)
+- `age`: Usia ibu hamil
+- `blood_type`: Golongan darah (A+, A-, B+, B-, AB+, AB-, O+, O-)
+- `emergency_contact_relation`: Hubungan dengan kontak darurat
+- `healthcare_preference`: Preferensi layanan kesehatan
+- `whatsapp_consent`: Persetujuan menerima notifikasi via WhatsApp (default: true)
+- `data_sharing_consent`: Persetujuan berbagi data (default: false)
+
+## Field yang TIDAK Boleh Diisi Saat Registrasi
+- `risk_level`: Akan diabaikan. Risk level ditentukan oleh perawat setelah assessment
+- `profile_photo_url`: Akan diabaikan. Upload foto profil menggunakan endpoint terpisah
+
+## Langkah Selanjutnya (di Frontend)
+1. Setelah registrasi berhasil, simpan `access_token` untuk autentikasi
+2. Panggil endpoint `GET /puskesmas/nearest?latitude={lat}&longitude={lon}` untuk mendapatkan list puskesmas terdekat
+3. Tampilkan list puskesmas ke user untuk dipilih
+4. Panggil endpoint `POST /ibu-hamil/{ibu_id}/assign-puskesmas` dengan puskesmas_id yang dipilih
 """,
     responses={
         201: {
-            "description": "Registrasi berhasil, user dan profil ibu hamil telah dibuat",
+            "description": "Registrasi berhasil. User dan profil ibu hamil telah dibuat. Access token dikembalikan untuk login otomatis.",
             "content": {
                 "application/json": {
                     "example": {
-                        "ibu_hamil": {"id": 1, "nama_lengkap": "Siti Aminah", "nik": "3175091201850001", "puskesmas_id": None},
-                        "user": {"id": 1, "phone": "+6281234567890", "full_name": "Siti Aminah"},
-                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "ibu_hamil": {
+                            "id": 1,
+                            "user_id": 15,
+                            "puskesmas_id": None,
+                            "perawat_id": None,
+                            "nama_lengkap": "Siti Aminah",
+                            "nik": "3175091201850001",
+                            "date_of_birth": "1985-12-12",
+                            "age": 39,
+                            "blood_type": "O+",
+                            "last_menstrual_period": "2024-12-01",
+                            "estimated_due_date": "2025-09-08",
+                            "usia_kehamilan": 8,
+                            "kehamilan_ke": 2,
+                            "jumlah_anak": 1,
+                            "address": "Jl. Mawar No. 10, RT 02 RW 05, Kelurahan Sungai Penuh",
+                            "provinsi": "Jambi",
+                            "kota_kabupaten": "Kerinci",
+                            "location": [101.3912, -2.0645],
+                            "emergency_contact_name": "Budi (Suami)",
+                            "emergency_contact_phone": "+6281298765432",
+                            "risk_level": None,
+                            "is_active": True,
+                            "created_at": "2026-01-22T10:00:00Z",
+                            "updated_at": "2026-01-22T10:00:00Z"
+                        },
+                        "user": {
+                            "id": 15,
+                            "email": "siti.aminah@example.com",
+                            "phone": "+6281234567890",
+                            "full_name": "Siti Aminah",
+                            "role": "ibu_hamil",
+                            "is_active": True,
+                            "is_verified": False,
+                            "created_at": "2026-01-22T10:00:00Z",
+                            "updated_at": "2026-01-22T10:00:00Z"
+                        },
+                        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIrNjI4MTIzNDU2Nzg5MCIsImV4cCI6MTcwNjAwMDAwMH0.xxx",
                         "token_type": "bearer",
                         "message": "Registrasi berhasil. Silakan pilih puskesmas terdekat untuk melanjutkan."
                     }
@@ -309,7 +405,7 @@ Registrasi ibu hamil baru.
             }
         },
         400: {
-            "description": "Data tidak valid atau sudah terdaftar",
+            "description": "Data tidak valid atau sudah terdaftar di sistem",
             "content": {
                 "application/json": {
                     "examples": {
@@ -318,16 +414,16 @@ Registrasi ibu hamil baru.
                             "value": {"detail": "NIK sudah terdaftar di sistem. Setiap NIK hanya dapat digunakan sekali."}
                         },
                         "phone_different_role": {
-                            "summary": "Nomor telepon terdaftar dengan role berbeda",
-                            "value": {"detail": "Nomor telepon sudah terdaftar dengan role perawat. Silakan gunakan nomor lain atau login dengan akun yang ada."}
+                            "summary": "Nomor telepon terdaftar dengan akun lain",
+                            "value": {"detail": "Nomor telepon sudah terdaftar dengan akun lain. Silakan gunakan nomor lain atau login dengan akun yang ada."}
                         },
                         "phone_already_ibu_hamil": {
                             "summary": "Nomor telepon sudah terdaftar sebagai ibu hamil",
                             "value": {"detail": "Nomor telepon ini sudah terdaftar sebagai ibu hamil. Silakan login menggunakan akun yang ada."}
                         },
                         "email_different_role": {
-                            "summary": "Email terdaftar dengan role berbeda",
-                            "value": {"detail": "Email sudah terdaftar dengan role perawat. Silakan gunakan email lain."}
+                            "summary": "Email terdaftar dengan akun lain",
+                            "value": {"detail": "Email sudah terdaftar dengan akun lain. Silakan gunakan email lain."}
                         },
                         "email_already_ibu_hamil": {
                             "summary": "Email sudah terdaftar sebagai ibu hamil",
@@ -336,23 +432,76 @@ Registrasi ibu hamil baru.
                         "invalid_location": {
                             "summary": "Koordinat lokasi tidak valid",
                             "value": {"detail": "Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90."}
+                        },
+                        "invalid_blood_type": {
+                            "summary": "Golongan darah tidak valid",
+                            "value": {"detail": "Blood type must be one of ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']"}
+                        },
+                        "invalid_emergency_phone": {
+                            "summary": "Nomor kontak darurat tidak valid",
+                            "value": {"detail": "Emergency contact phone must be 8-15 digits, optional leading '+'"}
+                        },
+                        "invalid_phone": {
+                            "summary": "Nomor telepon tidak valid",
+                            "value": {"detail": "Phone must be 8-15 digits, optional leading '+'"}
                         }
                     }
                 }
             }
         },
         422: {
-            "description": "Validation error pada data input",
+            "description": "Validation error - Data input tidak sesuai format yang diharapkan",
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": [
-                            {
-                                "loc": ["body", "ibu_hamil", "nik"],
-                                "msg": "NIK must be exactly 16 digits",
-                                "type": "value_error"
+                    "examples": {
+                        "invalid_nik": {
+                            "summary": "NIK tidak valid (bukan 16 digit)",
+                            "value": {
+                                "detail": [
+                                    {
+                                        "loc": ["body", "ibu_hamil", "nik"],
+                                        "msg": "NIK must be exactly 16 digits",
+                                        "type": "value_error"
+                                    }
+                                ]
                             }
-                        ]
+                        },
+                        "missing_field": {
+                            "summary": "Field wajib tidak diisi",
+                            "value": {
+                                "detail": [
+                                    {
+                                        "loc": ["body", "ibu_hamil", "nama_lengkap"],
+                                        "msg": "Field required",
+                                        "type": "missing"
+                                    }
+                                ]
+                            }
+                        },
+                        "invalid_date": {
+                            "summary": "Format tanggal tidak valid",
+                            "value": {
+                                "detail": [
+                                    {
+                                        "loc": ["body", "ibu_hamil", "date_of_birth"],
+                                        "msg": "Input should be a valid date",
+                                        "type": "date_parsing"
+                                    }
+                                ]
+                            }
+                        },
+                        "invalid_location_format": {
+                            "summary": "Format lokasi tidak valid",
+                            "value": {
+                                "detail": [
+                                    {
+                                        "loc": ["body", "ibu_hamil", "location"],
+                                        "msg": "Location must be a (longitude, latitude) tuple",
+                                        "type": "value_error"
+                                    }
+                                ]
+                            }
+                        }
                     }
                 }
             }
@@ -361,7 +510,20 @@ Registrasi ibu hamil baru.
             "description": "Kesalahan server internal",
             "content": {
                 "application/json": {
-                    "example": {"detail": "Terjadi kesalahan saat memproses registrasi. Silakan coba lagi."}
+                    "examples": {
+                        "create_user_failed": {
+                            "summary": "Gagal membuat akun user",
+                            "value": {"detail": "Gagal membuat akun user: [error message]"}
+                        },
+                        "create_profile_failed": {
+                            "summary": "Gagal membuat profil ibu hamil",
+                            "value": {"detail": "Gagal membuat profil ibu hamil: [error message]"}
+                        },
+                        "unexpected_error": {
+                            "summary": "Error tidak terduga",
+                            "value": {"detail": "Terjadi kesalahan tidak terduga saat memproses registrasi: [error message]"}
+                        }
+                    }
                 }
             }
         }
@@ -405,7 +567,7 @@ async def register_ibu_hamil(
             if existing_user.role != "ibu_hamil":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Nomor telepon sudah terdaftar dengan role {existing_user.role}. Silakan gunakan nomor lain atau login dengan akun yang ada."
+                    detail="Nomor telepon sudah terdaftar dengan akun lain. Silakan gunakan nomor lain atau login dengan akun yang ada."
                 )
             # Check if this user already has an ibu_hamil profile
             existing_ibu_for_user = db.query(IbuHamil).filter(IbuHamil.user_id == existing_user.id).first()
@@ -423,7 +585,7 @@ async def register_ibu_hamil(
                     if existing_user_by_email.role != "ibu_hamil":
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Email sudah terdaftar dengan role {existing_user_by_email.role}. Silakan gunakan email lain."
+                            detail="Email sudah terdaftar dengan akun lain. Silakan gunakan email lain."
                         )
                     # Check if this user already has an ibu_hamil profile
                     existing_ibu_for_email_user = db.query(IbuHamil).filter(IbuHamil.user_id == existing_user_by_email.id).first()
@@ -681,7 +843,67 @@ async def login_ibu_hamil(
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
     summary="Profil ibu hamil saat ini",
-    description="Mengambil profil ibu hamil milik user yang login (role ibu_hamil atau kerabat terkait).",
+    description="""
+Mengambil profil ibu hamil milik user yang sedang login.
+
+**Akses:**
+- Ibu hamil: Dapat melihat profil dirinya sendiri
+- Kerabat: Dapat melihat profil ibu hamil yang terhubung dengannya
+
+**Data yang dikembalikan:**
+- Identitas pribadi (nama, NIK, tanggal lahir, dll)
+- Data kehamilan (usia kehamilan, HPHT, HPL, dll)
+- Alamat dan lokasi
+- Kontak darurat
+- Riwayat kesehatan
+- Status assignment ke puskesmas dan perawat
+- Risk level (jika sudah ditentukan oleh perawat)
+""",
+    responses={
+        200: {
+            "description": "Profil ibu hamil berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "user_id": 15,
+                        "puskesmas_id": 2,
+                        "perawat_id": 3,
+                        "nama_lengkap": "Siti Aminah",
+                        "nik": "3175091201850001",
+                        "date_of_birth": "1985-12-12",
+                        "age": 39,
+                        "blood_type": "O+",
+                        "usia_kehamilan": 8,
+                        "kehamilan_ke": 2,
+                        "jumlah_anak": 1,
+                        "location": [101.3912, -2.0645],
+                        "address": "Jl. Mawar No. 10",
+                        "emergency_contact_name": "Budi (Suami)",
+                        "emergency_contact_phone": "+6281234567890",
+                        "risk_level": "sedang",
+                        "is_active": True
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized to access this record"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
 )
 async def get_my_profile(
     current_user: User = Depends(get_current_active_user),
@@ -1196,8 +1418,103 @@ async def update_my_user(
     "/{ibu_id}",
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
-    summary="Detail ibu hamil",
-    description="Dapat diakses oleh admin, perawat yang ditugaskan, admin puskesmas terkait, kerabat terkait, atau pemilik akun.",
+    summary="Detail ibu hamil berdasarkan ID",
+    description="""
+Mengambil detail profil ibu hamil berdasarkan ID.
+
+**Siapa yang dapat mengakses:**
+- **Super Admin**: Dapat melihat semua data ibu hamil (read-only)
+- **Admin Puskesmas**: Dapat melihat data ibu hamil yang terdaftar di puskesmasnya
+- **Perawat**: Dapat melihat data ibu hamil yang ditugaskan kepadanya
+- **Kerabat**: Dapat melihat data ibu hamil yang terhubung dengannya
+- **Ibu Hamil**: Dapat melihat data dirinya sendiri
+
+**Data yang dikembalikan:**
+- Identitas pribadi (nama lengkap, NIK, tanggal lahir, usia, golongan darah)
+- Data kehamilan (usia kehamilan, HPHT, HPL, kehamilan ke, jumlah anak, dll)
+- Alamat dan lokasi geografis
+- Kontak darurat
+- Riwayat kesehatan (darah tinggi, diabetes, anemia, dll)
+- Risk level dan informasi perawat yang menentukan
+- Status assignment ke puskesmas dan perawat
+""",
+    responses={
+        200: {
+            "description": "Detail ibu hamil berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "user_id": 15,
+                        "puskesmas_id": 2,
+                        "perawat_id": 3,
+                        "assigned_by_user_id": 10,
+                        "nama_lengkap": "Siti Aminah",
+                        "nik": "3175091201850001",
+                        "date_of_birth": "1985-12-12",
+                        "age": 39,
+                        "blood_type": "O+",
+                        "profile_photo_url": "/uploads/photos/profiles/ibu_hamil_1.jpg",
+                        "last_menstrual_period": "2024-12-01",
+                        "estimated_due_date": "2025-09-08",
+                        "usia_kehamilan": 8,
+                        "kehamilan_ke": 2,
+                        "jumlah_anak": 1,
+                        "miscarriage_number": 0,
+                        "jarak_kehamilan_terakhir": "2 tahun",
+                        "previous_pregnancy_complications": None,
+                        "pernah_caesar": False,
+                        "pernah_perdarahan_saat_hamil": False,
+                        "address": "Jl. Mawar No. 10, RT 02 RW 05",
+                        "provinsi": "Jambi",
+                        "kota_kabupaten": "Kerinci",
+                        "kelurahan": "Sungai Penuh",
+                        "kecamatan": "Pesisir Bukit",
+                        "location": [101.3912, -2.0645],
+                        "emergency_contact_name": "Budi (Suami)",
+                        "emergency_contact_phone": "+6281234567890",
+                        "emergency_contact_relation": "Suami",
+                        "darah_tinggi": False,
+                        "diabetes": False,
+                        "anemia": False,
+                        "penyakit_jantung": False,
+                        "asma": False,
+                        "penyakit_ginjal": False,
+                        "tbc_malaria": False,
+                        "risk_level": "sedang",
+                        "risk_level_set_by": 3,
+                        "risk_level_set_by_name": "Bidan Rina",
+                        "risk_level_set_at": "2026-01-15T10:00:00Z",
+                        "assignment_date": "2026-01-10T08:00:00Z",
+                        "assignment_distance_km": 2.5,
+                        "assignment_method": "manual",
+                        "healthcare_preference": "puskesmas",
+                        "whatsapp_consent": True,
+                        "data_sharing_consent": False,
+                        "is_active": True,
+                        "created_at": "2026-01-05T10:00:00Z",
+                        "updated_at": "2026-01-15T10:00:00Z"
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses untuk melihat data ini",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized to access this record"}
+                }
+            }
+        },
+        404: {
+            "description": "Ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Ibu Hamil not found"}
+                }
+            }
+        }
+    }
 )
 async def get_ibu_hamil(
     ibu_id: int,
@@ -1213,8 +1530,90 @@ async def get_ibu_hamil(
     "/{ibu_id}",
     response_model=IbuHamilResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update ibu hamil",
-    description="Admin, pemilik akun, perawat terassign, atau admin puskesmas dapat memperbarui data. Jika lokasi diubah, akan mencoba auto-assign ulang.",
+    summary="Update data ibu hamil",
+    description="""
+Memperbarui data ibu hamil berdasarkan ID.
+
+**Siapa yang dapat mengakses:**
+- **Ibu Hamil**: Dapat mengupdate data dirinya sendiri
+- **Admin Puskesmas**: Dapat mengupdate data ibu hamil yang terdaftar di puskesmasnya
+- **Perawat**: Dapat mengupdate data ibu hamil yang ditugaskan kepadanya
+- **Super Admin**: TIDAK dapat mengupdate (hanya read-only access)
+
+**Field yang dapat diupdate:**
+- Identitas: nama_lengkap, nik, date_of_birth, age, blood_type
+- Kehamilan: usia_kehamilan, kehamilan_ke, jumlah_anak, miscarriage_number, dll
+- Alamat: address, provinsi, kota_kabupaten, kelurahan, kecamatan, location
+- Kontak darurat: emergency_contact_name, emergency_contact_phone, emergency_contact_relation
+- Riwayat kesehatan: riwayat_kesehatan_ibu (nested object)
+- Lainnya: risk_level (hanya oleh perawat), healthcare_preference, consent fields
+
+**Catatan:**
+- Tidak semua field wajib diisi, hanya field yang ingin diupdate
+- Jika NIK diupdate, akan dicek untuk duplikasi
+- Jika location diupdate, format harus [longitude, latitude]
+""",
+    responses={
+        200: {
+            "description": "Data ibu hamil berhasil diupdate",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "user_id": 15,
+                        "puskesmas_id": 2,
+                        "perawat_id": 3,
+                        "nama_lengkap": "Siti Aminah Updated",
+                        "nik": "3175091201850001",
+                        "usia_kehamilan": 9,
+                        "is_active": True,
+                        "updated_at": "2026-01-22T10:00:00Z"
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses untuk mengupdate data ini",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "not_authorized": {
+                            "summary": "Bukan pemilik atau tidak memiliki akses",
+                            "value": {"detail": "Not authorized to update this record"}
+                        },
+                        "super_admin": {
+                            "summary": "Super admin tidak dapat update",
+                            "value": {"detail": "Super admin tidak dapat mengupdate data ibu hamil (read-only access)."}
+                        }
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Ibu Hamil not found"}
+                }
+            }
+        },
+        422: {
+            "description": "Validation error pada data input",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["body", "nik"],
+                                "msg": "NIK must be exactly 16 digits",
+                                "type": "value_error"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
 )
 async def update_ibu_hamil(
     ibu_id: int,
@@ -1234,8 +1633,54 @@ async def update_ibu_hamil(
     "/unassigned",
     response_model=List[IbuHamilResponse],
     status_code=status.HTTP_200_OK,
-    summary="Ibu hamil belum ter-assign",
-    description="Admin, super admin (read-only), atau admin puskesmas yang dapat melihat daftar ibu hamil tanpa puskesmas.",
+    summary="Daftar ibu hamil yang belum ter-assign ke puskesmas",
+    description="""
+Mendapatkan daftar ibu hamil yang belum ditugaskan ke puskesmas manapun.
+
+**Siapa yang dapat mengakses:**
+- **Super Admin**: Dapat melihat semua ibu hamil yang belum ter-assign (read-only)
+- **Admin Puskesmas**: Dapat melihat daftar untuk proses assignment
+
+**Kegunaan:**
+- Untuk admin puskesmas melakukan assignment manual ibu hamil ke puskesmasnya
+- Untuk monitoring ibu hamil yang belum terlayani
+
+**Response:**
+- Daftar ibu hamil dengan puskesmas_id = null
+- Diurutkan berdasarkan waktu registrasi
+""",
+    responses={
+        200: {
+            "description": "Daftar ibu hamil belum ter-assign berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 5,
+                            "user_id": 25,
+                            "puskesmas_id": None,
+                            "perawat_id": None,
+                            "nama_lengkap": "Dewi Sartika",
+                            "nik": "3175091201900002",
+                            "date_of_birth": "1990-05-15",
+                            "location": [101.4, -2.1],
+                            "address": "Jl. Kenanga No. 5",
+                            "is_active": True,
+                            "created_at": "2026-01-20T08:00:00Z"
+                        }
+                    ]
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized"}
+                }
+            }
+        }
+    }
 )
 async def list_unassigned(
     current_user: User = Depends(get_current_active_user),
@@ -1565,8 +2010,84 @@ async def assign_ibu_to_perawat(
     "/{ibu_id}/auto-assign",
     response_model=AutoAssignResponse,
     status_code=status.HTTP_200_OK,
-    summary="Auto-assign ke puskesmas terdekat",
-    description="Admin atau ibu bersangkutan dapat melakukan penugasan otomatis ke puskesmas terdekat yang aktif dan tersedia.",
+    summary="Auto-assign ibu hamil ke puskesmas terdekat",
+    description="""
+Melakukan penugasan otomatis ibu hamil ke puskesmas terdekat berdasarkan lokasi geografis.
+
+**Siapa yang dapat mengakses:**
+- **Ibu Hamil**: Dapat melakukan auto-assign untuk dirinya sendiri
+
+**Proses Auto-Assign:**
+1. Mencari puskesmas terdekat dalam radius 20 km dari lokasi ibu hamil
+2. Memilih puskesmas yang berstatus 'approved' dan aktif
+3. Meng-assign ibu hamil ke puskesmas tersebut
+4. Mencari perawat yang tersedia di puskesmas tersebut
+5. Jika ada perawat tersedia, assign ibu hamil ke perawat tersebut
+6. Mengirim notifikasi ke ibu hamil tentang penugasan
+
+**Catatan:**
+- Lokasi ibu hamil harus sudah terisi saat registrasi
+- Jika tidak ada puskesmas dalam radius 20 km, akan mengembalikan error 404
+- Perawat yang dipilih adalah perawat pertama yang tersedia (berdasarkan workload)
+
+**Response:**
+- Data ibu hamil yang sudah di-update dengan puskesmas_id dan perawat_id
+- Data puskesmas yang ditugaskan
+- Jarak dalam kilometer dari lokasi ibu hamil ke puskesmas
+""",
+    responses={
+        200: {
+            "description": "Auto-assign berhasil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "ibu_hamil": {
+                            "id": 1,
+                            "puskesmas_id": 2,
+                            "perawat_id": 3,
+                            "nama_lengkap": "Siti Aminah",
+                            "nik": "3175091201850001",
+                            "location": [101.39, -2.06],
+                            "is_active": True
+                        },
+                        "puskesmas": {
+                            "id": 2,
+                            "name": "Puskesmas Sungai Penuh",
+                            "code": "PKM-ABC-123",
+                            "registration_status": "approved",
+                            "is_active": True
+                        },
+                        "distance_km": 1.2
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized"}
+                }
+            }
+        },
+        404: {
+            "description": "Tidak ada puskesmas terdekat atau ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ibu_not_found": {
+                            "summary": "Ibu hamil tidak ditemukan",
+                            "value": {"detail": "Ibu Hamil not found"}
+                        },
+                        "no_puskesmas": {
+                            "summary": "Tidak ada puskesmas terdekat",
+                            "value": {"detail": "Tidak ada Puskesmas terdekat dengan kapasitas tersedia dalam radius"}
+                        }
+                    }
+                }
+            }
+        }
+    }
 )
 async def auto_assign(
     ibu_id: int,
@@ -1600,7 +2121,101 @@ async def auto_assign(
     response_model=List[IbuHamilResponse],
     status_code=status.HTTP_200_OK,
     summary="Daftar ibu hamil per puskesmas",
-    description="Admin, admin puskesmas tersebut, atau perawat di puskesmas tersebut dapat melihat daftar ibu hamil.",
+    description="""
+Mendapatkan daftar ibu hamil yang terdaftar di puskesmas tertentu.
+
+**Akses:**
+- Super admin (read-only)
+- Admin puskesmas tersebut
+- Perawat di puskesmas tersebut
+
+**Query Parameters:**
+- skip: Jumlah data yang dilewati (default: 0)
+- limit: Maksimal jumlah data yang dikembalikan (default: 100)
+
+**Response:**
+- Daftar ibu hamil yang ter-assign ke puskesmas ini
+- Termasuk informasi risk level: `risk_level`, `risk_level_set_by`, `risk_level_set_by_name`, `risk_level_set_at`
+""",
+    responses={
+        200: {
+            "description": "Daftar ibu hamil berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "user_id": 20,
+                            "puskesmas_id": 1,
+                            "perawat_id": 5,
+                            "assigned_by_user_id": 10,
+                            "nama_lengkap": "Siti Aminah",
+                            "nik": "3175091201850001",
+                            "date_of_birth": "1985-12-12",
+                            "age": 39,
+                            "blood_type": "O+",
+                            "profile_photo_url": "/uploads/photos/profiles/ibu_hamil_1.jpg",
+                            "last_menstrual_period": "2024-12-01",
+                            "estimated_due_date": "2025-09-08",
+                            "usia_kehamilan": 8,
+                            "kehamilan_ke": 2,
+                            "jumlah_anak": 1,
+                            "miscarriage_number": 0,
+                            "jarak_kehamilan_terakhir": "2 tahun",
+                            "previous_pregnancy_complications": None,
+                            "pernah_caesar": False,
+                            "pernah_perdarahan_saat_hamil": False,
+                            "address": "Jl. Mawar No. 10, RT 02 RW 05",
+                            "provinsi": "Jambi",
+                            "kota_kabupaten": "Kerinci",
+                            "kelurahan": "Sungai Penuh",
+                            "kecamatan": "Pesisir Bukit",
+                            "location": [101.3912, -2.0645],
+                            "emergency_contact_name": "Budi (Suami)",
+                            "emergency_contact_phone": "+6281234567890",
+                            "emergency_contact_relation": "Suami",
+                            "darah_tinggi": False,
+                            "diabetes": False,
+                            "anemia": False,
+                            "penyakit_jantung": False,
+                            "asma": False,
+                            "penyakit_ginjal": False,
+                            "tbc_malaria": False,
+                            "risk_level": "tinggi",
+                            "risk_level_set_by": 5,
+                            "risk_level_set_by_name": "Bidan Rina Wijaya",
+                            "risk_level_set_at": "2026-01-20T10:30:00Z",
+                            "assignment_date": "2026-01-15T08:00:00Z",
+                            "assignment_distance_km": 2.5,
+                            "assignment_method": "manual",
+                            "healthcare_preference": "puskesmas",
+                            "whatsapp_consent": True,
+                            "data_sharing_consent": False,
+                            "is_active": True,
+                            "created_at": "2026-01-10T10:00:00Z",
+                            "updated_at": "2026-01-20T10:30:00Z"
+                        }
+                    ]
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized"}
+                }
+            }
+        },
+        404: {
+            "description": "Puskesmas tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Puskesmas tidak ditemukan"}
+                }
+            }
+        }
+    }
 )
 async def list_by_puskesmas(
     puskesmas_id: int,
@@ -1608,7 +2223,7 @@ async def list_by_puskesmas(
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> List[IbuHamil]:
+) -> List[IbuHamilResponse]:
     pusk = crud_puskesmas.get(db, id=puskesmas_id)
     if not pusk:
         raise HTTPException(
@@ -1635,9 +2250,11 @@ async def list_by_puskesmas(
                 detail="Not authorized",
             )
 
-    results = (
+    # Query with eager loading for risk_assessor relationship
+    ibu_hamil_list = (
         db.execute(
             select(IbuHamil)
+            .options(selectinload(IbuHamil.risk_assessor))
             .where(IbuHamil.puskesmas_id == puskesmas_id)
             .offset(skip)
             .limit(limit)
@@ -1645,15 +2262,90 @@ async def list_by_puskesmas(
         .scalars()
         .all()
     )
-    return results
+
+    # Build response with risk_level_set_by_name
+    result = []
+    for ibu in ibu_hamil_list:
+        response = IbuHamilResponse.model_validate(ibu)
+        # Populate risk_level_set_by_name from relationship
+        if ibu.risk_assessor:
+            response.risk_level_set_by_name = ibu.risk_assessor.nama_lengkap
+        result.append(response)
+
+    return result
 
 
 @router.get(
     "/by-perawat/{perawat_id}",
     response_model=List[IbuHamilResponse],
     status_code=status.HTTP_200_OK,
-    summary="Daftar ibu hamil per perawat",
-    description="Admin, perawat terkait, atau admin puskesmas yang menaungi perawat dapat melihat daftar ini.",
+    summary="Daftar ibu hamil yang ditangani perawat",
+    description="""
+Mendapatkan daftar ibu hamil yang ditugaskan ke perawat tertentu.
+
+**Siapa yang dapat mengakses:**
+- **Super Admin**: Dapat melihat semua data (read-only)
+- **Perawat**: Dapat melihat daftar ibu hamil yang ditugaskan kepadanya sendiri
+- **Admin Puskesmas**: Dapat melihat daftar ibu hamil dari perawat di puskesmasnya
+
+**Kegunaan:**
+- Untuk perawat melihat daftar pasien yang harus ditangani
+- Untuk admin puskesmas monitoring workload perawat
+- Untuk super admin monitoring layanan
+
+**Response:**
+- Daftar ibu hamil dengan perawat_id sesuai parameter
+- Termasuk informasi risk level dan data kehamilan
+""",
+    responses={
+        200: {
+            "description": "Daftar ibu hamil berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "user_id": 15,
+                            "puskesmas_id": 2,
+                            "perawat_id": 3,
+                            "nama_lengkap": "Siti Aminah",
+                            "nik": "3175091201850001",
+                            "usia_kehamilan": 8,
+                            "risk_level": "sedang",
+                            "is_active": True
+                        },
+                        {
+                            "id": 2,
+                            "user_id": 16,
+                            "puskesmas_id": 2,
+                            "perawat_id": 3,
+                            "nama_lengkap": "Ani Wijaya",
+                            "nik": "3175091201880003",
+                            "usia_kehamilan": 12,
+                            "risk_level": "tinggi",
+                            "is_active": True
+                        }
+                    ]
+                }
+            }
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Not authorized"}
+                }
+            }
+        },
+        404: {
+            "description": "Perawat tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Perawat tidak ditemukan"}
+                }
+            }
+        }
+    }
 )
 async def list_by_perawat(
     perawat_id: int,

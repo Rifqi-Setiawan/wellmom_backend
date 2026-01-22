@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, and_, or_
@@ -58,42 +58,6 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
         )
         return db.scalars(stmt).all()
 
-    def get_with_referral(self, db: Session) -> List[HealthRecord]:
-        """Get all health records that need referral."""
-        stmt = (
-            select(HealthRecord)
-            .where(HealthRecord.referral_needed == True)
-            .order_by(HealthRecord.checkup_date.desc())
-        )
-        return db.scalars(stmt).all()
-
-    def create_from_iot(
-        self, db: Session, *, ibu_hamil_id: int, vitals_data: Dict[str, Any]
-    ) -> HealthRecord:
-        """Create health record from IoT device vitals data.
-        
-        vitals_data should contain keys like:
-        - blood_pressure_systolic, blood_pressure_diastolic
-        - blood_glucose, body_temperature, heart_rate
-        """
-        record_data = {
-            "ibu_hamil_id": ibu_hamil_id,
-            "checkup_date": date.today(),
-            "checkup_type": "ad-hoc",
-            "data_source": "iot_device",
-            **vitals_data,
-        }
-        
-        db_obj = HealthRecord(**record_data)
-        try:
-            db.add(db_obj)
-            db.commit()
-            db.refresh(db_obj)
-        except Exception:
-            db.rollback()
-            raise
-        return db_obj
-    
     def get_by_date(
         self,
         db: Session,
@@ -113,7 +77,7 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
             .order_by(HealthRecord.created_at.desc())
         )
         return list(db.scalars(stmt).all())
-    
+
     def get_last_7_days_by_category(
         self,
         db: Session,
@@ -122,25 +86,23 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
         category: str,  # 'blood_pressure', 'blood_glucose', 'temperature', 'heart_rate'
     ) -> List[HealthRecord]:
         """Get health records from last 7 days filtered by category.
-        
+
         Categories:
         - 'blood_pressure': Returns records with blood_pressure_systolic OR blood_pressure_diastolic
         - 'blood_glucose': Returns records with blood_glucose
         - 'temperature': Returns records with body_temperature
         - 'heart_rate': Returns records with heart_rate
         """
-        from datetime import timedelta
-        
         end_date = date.today()
         start_date = end_date - timedelta(days=6)  # Last 7 days (including today)
-        
+
         # Build query based on category
         conditions = [
             HealthRecord.ibu_hamil_id == ibu_hamil_id,
             HealthRecord.checkup_date >= start_date,
             HealthRecord.checkup_date <= end_date,
         ]
-        
+
         # Add category-specific filter
         if category == "blood_pressure":
             conditions.append(
@@ -157,11 +119,33 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
             conditions.append(HealthRecord.heart_rate.isnot(None))
         else:
             raise ValueError(f"Invalid category: {category}. Must be one of: blood_pressure, blood_glucose, temperature, heart_rate")
-        
+
         stmt = (
             select(HealthRecord)
             .where(and_(*conditions))
             .order_by(HealthRecord.checkup_date.asc(), HealthRecord.created_at.asc())
+        )
+        return list(db.scalars(stmt).all())
+
+    def get_by_checked_by(
+        self,
+        db: Session,
+        *,
+        ibu_hamil_id: int,
+        checked_by: str,  # 'perawat' or 'mandiri'
+        limit: int = 50,
+    ) -> List[HealthRecord]:
+        """Get health records filtered by who checked (perawat or mandiri)."""
+        stmt = (
+            select(HealthRecord)
+            .where(
+                and_(
+                    HealthRecord.ibu_hamil_id == ibu_hamil_id,
+                    HealthRecord.checked_by == checked_by,
+                )
+            )
+            .order_by(HealthRecord.checkup_date.desc())
+            .limit(limit)
         )
         return list(db.scalars(stmt).all())
 

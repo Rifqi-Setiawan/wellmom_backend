@@ -30,4 +30,4 @@ class Perawat(Base):
     
     # Relationships
     puskesmas = relationship("Puskesmas", back_populates="perawat_list")
-    ibu_hamil_list = relationship("IbuHamil", back_populates="perawat")
+    ibu_hamil_list = relationship("IbuHamil", back_populates="perawat", foreign_keys="[IbuHamil.perawat_id]")

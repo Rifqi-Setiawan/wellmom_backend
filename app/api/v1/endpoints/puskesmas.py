@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_active_user, get_db, get_optional_current_user, require_role
 from app.crud import crud_ibu_hamil, crud_notification, crud_perawat, crud_puskesmas, crud_user
@@ -449,6 +449,7 @@ Mendapatkan daftar ibu hamil yang terdaftar di puskesmas yang sedang login.
 **Response:**
 - Daftar ibu hamil yang ter-assign ke puskesmas ini
 - Sudah diurutkan berdasarkan tanggal registrasi terbaru
+- Termasuk informasi risk level: `risk_level`, `risk_level_set_by`, `risk_level_set_by_name`, `risk_level_set_at`
 """,
     responses={
         200: {
@@ -487,7 +488,7 @@ async def list_my_ibu_hamil(
     has_perawat: Optional[bool] = None,
     current_user: User = Depends(require_role("puskesmas")),
     db: Session = Depends(get_db),
-) -> List[IbuHamil]:
+) -> List[IbuHamilResponse]:
     """
     Mendapatkan daftar ibu hamil di puskesmas untuk admin puskesmas yang sedang login.
     
@@ -512,27 +513,39 @@ async def list_my_ibu_hamil(
             detail="Puskesmas belum aktif atau belum diapprove",
         )
     
-    # Build query
+    # Build query with eager loading for risk_assessor relationship
     stmt = (
         select(IbuHamil)
+        .options(selectinload(IbuHamil.risk_assessor))
         .where(IbuHamil.puskesmas_id == puskesmas.id)
         .order_by(IbuHamil.created_at.desc())
     )
-    
+
     # Apply filters
     if is_active is not None:
         stmt = stmt.where(IbuHamil.is_active == is_active)
-    
+
     if has_perawat is not None:
         if has_perawat:
             stmt = stmt.where(IbuHamil.perawat_id.isnot(None))
         else:
             stmt = stmt.where(IbuHamil.perawat_id.is_(None))
-    
+
     # Apply pagination
     stmt = stmt.offset(skip).limit(limit)
-    
-    return db.scalars(stmt).all()
+
+    ibu_hamil_list = db.scalars(stmt).all()
+
+    # Build response with risk_level_set_by_name
+    result = []
+    for ibu in ibu_hamil_list:
+        response = IbuHamilResponse.model_validate(ibu)
+        # Populate risk_level_set_by_name from relationship
+        if ibu.risk_assessor:
+            response.risk_level_set_by_name = ibu.risk_assessor.nama_lengkap
+        result.append(response)
+
+    return result
 
 
 @router.get(
@@ -658,22 +671,45 @@ async def get_my_puskesmas_statistics(
     if total_ibu_hamil > 0:
         persentase_belum_ditugaskan = round((pasien_belum_ditugaskan / total_ibu_hamil) * 100, 2)
     
-    # 5. Distribusi risiko ibu hamil (DUMMY DATA untuk saat ini)
-    # TODO: Implementasi real ketika field risk_level sudah digunakan
+    # 5. Distribusi risiko ibu hamil (data real dari field risk_level)
+    risiko_rendah = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True,
+            IbuHamil.risk_level == "rendah"
+        )
+    ) or 0
+
+    risiko_sedang = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True,
+            IbuHamil.risk_level == "sedang"
+        )
+    ) or 0
+
+    risiko_tinggi = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True,
+            IbuHamil.risk_level == "tinggi"
+        )
+    ) or 0
+
+    belum_ditentukan = db.scalar(
+        select(func.count(IbuHamil.id)).where(
+            IbuHamil.puskesmas_id == puskesmas.id,
+            IbuHamil.is_active == True,
+            IbuHamil.risk_level.is_(None)
+        )
+    ) or 0
+
     distribusi_risiko = {
-        "rendah": 0,
-        "sedang": 0,
-        "tinggi": 0,
-        "note": "Data dummy - implementasi risk level belum tersedia"
+        "rendah": risiko_rendah,
+        "sedang": risiko_sedang,
+        "tinggi": risiko_tinggi,
+        "belum_ditentukan": belum_ditentukan
     }
-    
-    # Coba ambil data real jika ada field risk_level
-    # Untuk saat ini, kita berikan estimasi berdasarkan total ibu hamil
-    if total_ibu_hamil > 0:
-        # Dummy distribution: 60% rendah, 30% sedang, 10% tinggi
-        distribusi_risiko["rendah"] = int(total_ibu_hamil * 0.6)
-        distribusi_risiko["sedang"] = int(total_ibu_hamil * 0.3)
-        distribusi_risiko["tinggi"] = total_ibu_hamil - distribusi_risiko["rendah"] - distribusi_risiko["sedang"]
     
     return {
         "puskesmas_id": puskesmas.id,
