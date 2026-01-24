@@ -59,6 +59,34 @@ class IbuHamilProfileNotFoundException(IbuHamilLoginException):
         )
 
 
+class HealthRecordNotFoundException(HTTPException):
+    """
+    Exception ketika health record tidak ditemukan untuk ibu hamil.
+
+    Digunakan ketika ibu hamil belum memiliki data health record sama sekali.
+    Berbeda dengan kasus ketika health record dengan ID tertentu tidak ditemukan.
+
+    Status Code: 404 Not Found
+
+    Penggunaan:
+        >>> from app.core.exceptions import HealthRecordNotFoundException
+        >>> raise HealthRecordNotFoundException()
+        >>> # atau dengan pesan custom
+        >>> raise HealthRecordNotFoundException(detail="Pesan custom")
+
+    Response Body:
+        {
+            "detail": "Belum ada data health record. Silakan lakukan pemeriksaan kesehatan terlebih dahulu."
+        }
+    """
+
+    def __init__(self, detail: str = "Belum ada data health record. Silakan lakukan pemeriksaan kesehatan terlebih dahulu."):
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=detail,
+        )
+
+
 __all__ = [
     "IbuHamilLoginException",
     "InvalidCredentialsException",
@@ -66,4 +94,5 @@ __all__ = [
     "AccountInactiveException",
     "NotIbuHamilException",
     "IbuHamilProfileNotFoundException",
+    "HealthRecordNotFoundException",
 ]

@@ -39,6 +39,11 @@ class CRUDPerawat(CRUDBase[Perawat, PerawatCreate, PerawatUpdate]):
         stmt = select(Perawat).where(Perawat.email == email).limit(1)
         return db.scalars(stmt).first()
 
+    def get_by_user_id(self, db: Session, *, user_id: int) -> Optional[Perawat]:
+        """Get Perawat by user_id."""
+        stmt = select(Perawat).where(Perawat.user_id == user_id).limit(1)
+        return db.scalars(stmt).first()
+
     def get_with_patient_count(self, db: Session, *, perawat_id: int) -> Optional[dict]:
         """Get Perawat with patient count."""
         perawat = self.get(db, perawat_id)

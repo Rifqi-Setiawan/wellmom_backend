@@ -83,7 +83,7 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
         db: Session,
         *,
         ibu_hamil_id: int,
-        category: str,  # 'blood_pressure', 'blood_glucose', 'temperature', 'heart_rate'
+        category: str,  # 'blood_pressure', 'blood_glucose', 'temperature', 'heart_rate', 'hemoglobin'
     ) -> List[HealthRecord]:
         """Get health records from last 7 days filtered by category.
 
@@ -92,6 +92,7 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
         - 'blood_glucose': Returns records with blood_glucose
         - 'temperature': Returns records with body_temperature
         - 'heart_rate': Returns records with heart_rate
+        - 'hemoglobin': Returns records with hemoglobin
         """
         end_date = date.today()
         start_date = end_date - timedelta(days=6)  # Last 7 days (including today)
@@ -117,8 +118,10 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
             conditions.append(HealthRecord.body_temperature.isnot(None))
         elif category == "heart_rate":
             conditions.append(HealthRecord.heart_rate.isnot(None))
+        elif category == "hemoglobin":
+            conditions.append(HealthRecord.hemoglobin.isnot(None))
         else:
-            raise ValueError(f"Invalid category: {category}. Must be one of: blood_pressure, blood_glucose, temperature, heart_rate")
+            raise ValueError(f"Invalid category: {category}. Must be one of: blood_pressure, blood_glucose, temperature, heart_rate, hemoglobin")
 
         stmt = (
             select(HealthRecord)

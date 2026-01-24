@@ -268,27 +268,101 @@ def get_health_records_by_date(
     status_code=status.HTTP_200_OK,
     summary="Get health records last 7 days by category",
     description="""
-    Get health records from the last 7 days (including today) filtered by category.
+Mengambil health records dari 7 hari terakhir (termasuk hari ini) yang difilter berdasarkan kategori.
 
-    **Categories:**
-    - `blood_pressure`: Returns records with blood pressure (systolic or diastolic)
-    - `blood_glucose`: Returns records with blood glucose
-    - `temperature`: Returns records with body temperature
-    - `heart_rate`: Returns records with heart rate
+## Kategori yang Tersedia
 
-    **Access:**
-    - Ibu Hamil: Can only access their own records
-    - Perawat: Can access all health records
-    - Puskesmas: Can access all health records
-    - Super Admin: Can access all records
+| Kategori | Field yang Difilter | Keterangan |
+|----------|---------------------|------------|
+| `blood_pressure` | blood_pressure_systolic, blood_pressure_diastolic | Tekanan darah (mmHg) |
+| `blood_glucose` | blood_glucose | Gula darah (mg/dL) |
+| `temperature` | body_temperature | Suhu tubuh (°C) |
+| `heart_rate` | heart_rate | Detak jantung (bpm) |
+| `hemoglobin` | hemoglobin | Kadar hemoglobin (g/dL) |
+
+## Akses
+- **Ibu Hamil**: Hanya dapat mengakses records milik sendiri
+- **Perawat**: Dapat mengakses semua health records
+- **Puskesmas**: Dapat mengakses semua health records
+- **Super Admin**: Dapat mengakses semua records
+
+## Response
+Response akan berisi:
+- `category`: Kategori yang diminta
+- `records`: List health records yang memiliki data untuk kategori tersebut
+- `total`: Jumlah total records
+- `start_date`: Tanggal awal (7 hari yang lalu)
+- `end_date`: Tanggal akhir (hari ini)
+
+## Catatan
+- Records diurutkan berdasarkan tanggal pemeriksaan (ascending)
+- Hanya records yang memiliki nilai untuk kategori tersebut yang dikembalikan
+- Kategori `hemoglobin` berguna untuk memantau kadar Hb ibu hamil dan mendeteksi anemia
     """,
+    responses={
+        200: {
+            "description": "Health records berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "category": "hemoglobin",
+                        "records": [
+                            {
+                                "id": 1,
+                                "ibu_hamil_id": 1,
+                                "perawat_id": 1,
+                                "checkup_date": "2025-02-10",
+                                "checked_by": "perawat",
+                                "blood_pressure_systolic": 120,
+                                "blood_pressure_diastolic": 80,
+                                "heart_rate": 72,
+                                "body_temperature": 36.8,
+                                "weight": 65.5,
+                                "complaints": "Tidak ada keluhan",
+                                "hemoglobin": 11.5,
+                                "created_at": "2025-02-10T10:00:00Z",
+                                "updated_at": "2025-02-10T10:00:00Z",
+                            }
+                        ],
+                        "total": 1,
+                        "start_date": "2025-02-09",
+                        "end_date": "2025-02-15"
+                    }
+                }
+            },
+        },
+        400: {
+            "description": "Kategori tidak valid",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Invalid category. Must be one of: blood_glucose, blood_pressure, heart_rate, hemoglobin, temperature"}
+                }
+            },
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Anda tidak memiliki akses ke health records ini."}
+                }
+            },
+        },
+        404: {
+            "description": "Ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Ibu hamil tidak ditemukan."}
+                }
+            },
+        },
+    },
 )
 def get_health_records_last_7_days(
     ibu_hamil_id: int,
     category: str = Path(
         ...,
-        description="Category filter: blood_pressure, blood_glucose, temperature, or heart_rate",
-        pattern="^(blood_pressure|blood_glucose|temperature|heart_rate)$"
+        description="Category filter: blood_pressure, blood_glucose, temperature, heart_rate, atau hemoglobin",
+        pattern="^(blood_pressure|blood_glucose|temperature|heart_rate|hemoglobin)$"
     ),
     current_user: User = Depends(require_role(*ALLOWED_ROLES)),
     db: Session = Depends(get_db),
@@ -297,11 +371,11 @@ def get_health_records_last_7_days(
     _authorize_read_access(db, ibu_hamil_id, current_user)
 
     # Validate category
-    valid_categories = {"blood_pressure", "blood_glucose", "temperature", "heart_rate"}
+    valid_categories = {"blood_pressure", "blood_glucose", "temperature", "heart_rate", "hemoglobin"}
     if category not in valid_categories:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+            detail=f"Invalid category. Must be one of: {', '.join(sorted(valid_categories))}"
         )
 
     # Get records
