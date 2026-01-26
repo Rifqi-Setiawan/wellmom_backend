@@ -152,6 +152,35 @@ class CRUDHealthRecord(CRUDBase[HealthRecord, HealthRecordCreate, HealthRecordUp
         )
         return list(db.scalars(stmt).all())
 
+    def get_latest_perawat_notes(
+        self,
+        db: Session,
+        *,
+        ibu_hamil_id: int,
+    ) -> Optional[HealthRecord]:
+        """Get the latest health record from perawat that has notes.
+
+        This fetches the most recent health record where:
+        - checked_by = 'perawat' (pengecekan oleh perawat di puskesmas)
+        - notes IS NOT NULL and notes != '' (memiliki catatan)
+
+        Returns None if no record with notes from perawat is found.
+        """
+        stmt = (
+            select(HealthRecord)
+            .where(
+                and_(
+                    HealthRecord.ibu_hamil_id == ibu_hamil_id,
+                    HealthRecord.checked_by == "perawat",
+                    HealthRecord.notes.isnot(None),
+                    HealthRecord.notes != "",
+                )
+            )
+            .order_by(HealthRecord.checkup_date.desc(), HealthRecord.created_at.desc())
+            .limit(1)
+        )
+        return db.scalars(stmt).first()
+
 
 # Singleton instance
 crud_health_record = CRUDHealthRecord(HealthRecord)

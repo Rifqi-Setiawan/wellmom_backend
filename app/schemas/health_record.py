@@ -147,3 +147,34 @@ class HealthRecordLast7DaysResponse(BaseModel):
     total: int
     start_date: date
     end_date: date
+
+
+class LatestPerawatNotesResponse(BaseModel):
+    """Response for latest notes from perawat."""
+    has_notes: bool
+    notes: Optional[str] = None
+    checkup_date: Optional[date] = None
+    perawat_id: Optional[int] = None
+    health_record_id: Optional[int] = None
+    message: str
+
+    model_config = ConfigDict(json_schema_extra={
+        "examples": [
+            {
+                "has_notes": True,
+                "notes": "Ibu dalam kondisi sehat. Tekanan darah normal. Lanjutkan pola makan sehat dan istirahat cukup.",
+                "checkup_date": "2026-01-20",
+                "perawat_id": 3,
+                "health_record_id": 15,
+                "message": "Catatan perawat terakhir ditemukan"
+            },
+            {
+                "has_notes": False,
+                "notes": None,
+                "checkup_date": None,
+                "perawat_id": None,
+                "health_record_id": None,
+                "message": "Belum ada catatan dari perawat. Silakan kunjungi puskesmas untuk pemeriksaan."
+            }
+        ]
+    })

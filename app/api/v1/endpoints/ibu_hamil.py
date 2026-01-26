@@ -39,7 +39,7 @@ from app.schemas.ibu_hamil import (
     IbuHamilProfileResponse,
     UserUpdateProfile,
 )
-from app.schemas.health_record import HealthRecordResponse
+from app.schemas.health_record import HealthRecordResponse, LatestPerawatNotesResponse
 from app.schemas.notification import NotificationCreate
 from app.schemas.puskesmas import PuskesmasResponse
 from app.schemas.user import UserCreate, UserResponse
@@ -1247,6 +1247,158 @@ async def get_my_latest_health_record(
         raise HealthRecordNotFoundException()
 
     return HealthRecordResponse.model_validate(latest_record)
+
+
+@router.get(
+    "/me/latest-perawat-notes",
+    response_model=LatestPerawatNotesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ambil catatan perawat terakhir untuk ibu hamil",
+    description="""
+Mengambil catatan (notes) terakhir dari perawat untuk ibu hamil yang sedang login.
+
+## Konteks
+- Catatan dari perawat hanya didapatkan saat ibu hamil melakukan pemeriksaan di puskesmas
+- Banyak health record yang tidak memiliki notes karena ibu hamil melakukan pemeriksaan mandiri di rumah
+- Endpoint ini mencari health record terakhir yang:
+  - Dilakukan oleh perawat (`checked_by = 'perawat'`)
+  - Memiliki catatan (`notes` tidak kosong)
+
+## Akses
+- **Role yang diizinkan:** `ibu_hamil`
+- Hanya dapat mengakses data milik sendiri
+
+## Response Fields
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| has_notes | boolean | Apakah ada catatan dari perawat |
+| notes | string | Isi catatan dari perawat (null jika belum ada) |
+| checkup_date | date | Tanggal pemeriksaan saat catatan dibuat (null jika belum ada) |
+| perawat_id | integer | ID perawat yang memberikan catatan (null jika belum ada) |
+| health_record_id | integer | ID health record yang memiliki catatan (null jika belum ada) |
+| message | string | Pesan informatif untuk ditampilkan ke user |
+
+## Kemungkinan Response
+1. **Ada catatan dari perawat:**
+   - `has_notes: true`
+   - Semua field terisi dengan data dari health record terakhir yang memiliki notes
+
+2. **Belum ada catatan dari perawat:**
+   - `has_notes: false`
+   - Field notes, checkup_date, perawat_id, health_record_id bernilai null
+   - message berisi informasi untuk kunjungi puskesmas
+""",
+    responses={
+        200: {
+            "description": "Catatan perawat berhasil diambil",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "has_notes": {
+                            "summary": "Ada catatan dari perawat",
+                            "value": {
+                                "has_notes": True,
+                                "notes": "Ibu dalam kondisi sehat. Tekanan darah normal. Lanjutkan pola makan sehat dan istirahat cukup.",
+                                "checkup_date": "2026-01-20",
+                                "perawat_id": 3,
+                                "health_record_id": 15,
+                                "message": "Catatan perawat terakhir ditemukan"
+                            }
+                        },
+                        "no_notes": {
+                            "summary": "Belum ada catatan dari perawat",
+                            "value": {
+                                "has_notes": False,
+                                "notes": None,
+                                "checkup_date": None,
+                                "perawat_id": None,
+                                "health_record_id": None,
+                                "message": "Belum ada catatan dari perawat. Silakan kunjungi puskesmas untuk pemeriksaan."
+                            }
+                        }
+                    }
+                }
+            },
+        },
+        401: {
+            "description": "Token tidak valid atau expired",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            },
+        },
+        403: {
+            "description": "Bukan role ibu_hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            },
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            },
+        },
+    },
+)
+async def get_my_latest_perawat_notes(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> LatestPerawatNotesResponse:
+    """
+    Mengambil catatan perawat terakhir untuk ibu hamil yang sedang login.
+
+    Endpoint ini berguna untuk menampilkan catatan/rekomendasi terakhir dari perawat
+    di halaman dashboard atau profil ibu hamil.
+
+    Args:
+        current_user: User yang sedang login (harus role ibu_hamil)
+        db: Database session
+
+    Returns:
+        LatestPerawatNotesResponse: Data catatan perawat terakhir atau informasi bahwa belum ada catatan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+
+    # Get latest health record with notes from perawat
+    record_with_notes = crud_health_record.get_latest_perawat_notes(db, ibu_hamil_id=ibu.id)
+
+    if record_with_notes:
+        return LatestPerawatNotesResponse(
+            has_notes=True,
+            notes=record_with_notes.notes,
+            checkup_date=record_with_notes.checkup_date,
+            perawat_id=record_with_notes.perawat_id,
+            health_record_id=record_with_notes.id,
+            message="Catatan perawat terakhir ditemukan",
+        )
+    else:
+        return LatestPerawatNotesResponse(
+            has_notes=False,
+            notes=None,
+            checkup_date=None,
+            perawat_id=None,
+            health_record_id=None,
+            message="Belum ada catatan dari perawat. Silakan kunjungi puskesmas untuk pemeriksaan.",
+        )
 
 
 @router.patch(
