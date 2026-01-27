@@ -190,8 +190,16 @@ def _is_puskesmas_admin(current_user: User, ibu: IbuHamil, db: Session) -> bool:
     return bool(pusk and pusk.admin_user_id == current_user.id)
 
 
-def _is_perawat_assigned(current_user: User, ibu: IbuHamil) -> bool:
-    return current_user.role == "perawat" and ibu.perawat_id is not None and current_user.id == ibu.perawat_id
+def _is_perawat_in_same_puskesmas(current_user: User, ibu: IbuHamil, db: Session) -> bool:
+    """Check if perawat is in the same puskesmas as ibu hamil."""
+    if current_user.role != "perawat":
+        return False
+    if not ibu.puskesmas_id:
+        return False
+    perawat = crud_perawat.get_by_user_id(db, user_id=current_user.id)
+    if not perawat:
+        return False
+    return perawat.puskesmas_id == ibu.puskesmas_id
 
 
 def _is_kerabat_linked(current_user: User, ibu: IbuHamil, db: Session) -> bool:
@@ -210,7 +218,7 @@ def _authorize_view(ibu: IbuHamil, current_user: User, db: Session) -> None:
         return
     if _is_puskesmas_admin(current_user, ibu, db):
         return
-    if _is_perawat_assigned(current_user, ibu):
+    if _is_perawat_in_same_puskesmas(current_user, ibu, db):
         return
     if _is_kerabat_linked(current_user, ibu, db):
         return
@@ -233,7 +241,7 @@ def _authorize_update(ibu: IbuHamil, current_user: User, db: Session) -> None:
         return
     if _is_puskesmas_admin(current_user, ibu, db):
         return
-    if _is_perawat_assigned(current_user, ibu):
+    if _is_perawat_in_same_puskesmas(current_user, ibu, db):
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
