@@ -2626,7 +2626,7 @@ async def list_by_puskesmas(
             detail="Not authorized",
         )
     if current_user.role == "perawat":
-        perawat = crud_perawat.get(db, id=current_user.id)
+        perawat = crud_perawat.get_by_user_id(db, user_id=current_user.id)
         if not perawat or perawat.puskesmas_id != puskesmas_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -2999,6 +2999,205 @@ async def list_my_patients_perawat(
         result.append(response)
 
     return result
+
+
+@router.get(
+    "/perawat/{ibu_id}/latest-health-record",
+    response_model=HealthRecordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ambil health record terbaru ibu hamil (untuk perawat)",
+    description="""
+Mengambil health record terbaru dari ibu hamil tertentu yang ditugaskan ke perawat yang sedang login.
+
+Endpoint ini digunakan untuk menampilkan ringkasan kondisi kesehatan terakhir ibu hamil di halaman dashboard perawat.
+
+## Akses
+- **Role yang diizinkan:** `perawat`
+- Perawat hanya dapat mengakses health record ibu hamil yang ditugaskan kepadanya
+
+## Path Parameter
+| Parameter | Tipe | Keterangan |
+|-----------|------|------------|
+| ibu_id | integer | ID ibu hamil yang ingin dilihat health record-nya |
+
+## Response Fields
+
+### Data Pemeriksaan
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| id | integer | ID unik health record |
+| ibu_hamil_id | integer | ID ibu hamil |
+| perawat_id | integer | ID perawat yang memeriksa (null jika mandiri) |
+| checkup_date | date | Tanggal pemeriksaan (YYYY-MM-DD) |
+| checked_by | string | Siapa yang memeriksa: `perawat` atau `mandiri` |
+
+### Usia Kehamilan
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| gestational_age_weeks | integer | Usia kehamilan dalam minggu |
+| gestational_age_days | integer | Usia kehamilan dalam hari (sisa) |
+
+### Tanda Vital (Wajib)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| blood_pressure_systolic | integer | Tekanan darah sistolik (mmHg) |
+| blood_pressure_diastolic | integer | Tekanan darah diastolik (mmHg) |
+| heart_rate | integer | Detak jantung (bpm) |
+| body_temperature | float | Suhu tubuh (°C) |
+| weight | float | Berat badan (kg) |
+| complaints | string | Keluhan yang dirasakan |
+
+### Data Lab/Puskesmas (Opsional)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| hemoglobin | float | Kadar hemoglobin (g/dL) |
+| blood_glucose | float | Gula darah (mg/dL) |
+| protein_urin | string | Protein urin (negatif, +1, +2, +3, +4) |
+| upper_arm_circumference | float | Lingkar lengan atas/LILA (cm) |
+| fundal_height | float | Tinggi fundus uteri (cm) |
+| fetal_heart_rate | integer | Detak jantung janin (bpm) |
+| notes | string | Catatan tambahan dari perawat |
+
+### Timestamp
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| created_at | datetime | Waktu record dibuat |
+| updated_at | datetime | Waktu record terakhir diupdate |
+
+## Error Handling
+- **401**: Token tidak valid atau expired
+- **403**: User bukan perawat atau ibu hamil tidak ditugaskan ke perawat ini
+- **404**: Profil perawat tidak ditemukan, ibu hamil tidak ditemukan, atau belum ada health record
+""",
+    responses={
+        200: {
+            "description": "Health record terbaru berhasil diambil",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": 1,
+                        "ibu_hamil_id": 1,
+                        "perawat_id": 1,
+                        "checkup_date": "2025-02-15",
+                        "checked_by": "perawat",
+                        "gestational_age_weeks": 28,
+                        "gestational_age_days": 3,
+                        "blood_pressure_systolic": 120,
+                        "blood_pressure_diastolic": 80,
+                        "heart_rate": 72,
+                        "body_temperature": 36.8,
+                        "weight": 65.5,
+                        "complaints": "Tidak ada keluhan",
+                        "hemoglobin": 12.5,
+                        "blood_glucose": 95.0,
+                        "protein_urin": "negatif",
+                        "upper_arm_circumference": 25.0,
+                        "fundal_height": 28.0,
+                        "fetal_heart_rate": 140,
+                        "notes": "Ibu dalam kondisi sehat",
+                        "created_at": "2025-02-15T10:00:00Z",
+                        "updated_at": "2025-02-15T10:00:00Z",
+                    }
+                }
+            },
+        },
+        401: {
+            "description": "Token tidak valid atau expired",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Could not validate credentials"}
+                }
+            },
+        },
+        403: {
+            "description": "Tidak memiliki akses",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "not_perawat": {
+                            "summary": "Bukan role perawat",
+                            "value": {"detail": "Hanya perawat yang dapat mengakses endpoint ini"}
+                        },
+                        "not_assigned": {
+                            "summary": "Ibu hamil tidak ditugaskan ke perawat ini",
+                            "value": {"detail": "Anda tidak memiliki akses ke data ibu hamil ini"}
+                        }
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Data tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "perawat_not_found": {
+                            "summary": "Profil perawat tidak ditemukan",
+                            "value": {"detail": "Profil perawat tidak ditemukan untuk user ini"}
+                        },
+                        "ibu_not_found": {
+                            "summary": "Ibu hamil tidak ditemukan",
+                            "value": {"detail": "Ibu hamil tidak ditemukan"}
+                        },
+                        "no_health_record": {
+                            "summary": "Belum ada health record",
+                            "value": {"detail": "Belum ada data health record. Silakan lakukan pemeriksaan kesehatan terlebih dahulu."}
+                        }
+                    }
+                }
+            },
+        },
+    },
+)
+async def get_ibu_hamil_latest_health_record_for_perawat(
+    ibu_id: int,
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> HealthRecordResponse:
+    """
+    Mengambil health record terbaru dari ibu hamil tertentu untuk perawat.
+
+    Args:
+        ibu_id: ID ibu hamil yang ingin dilihat health record-nya
+        current_user: User yang sedang login (harus role perawat)
+        db: Database session
+
+    Returns:
+        HealthRecordResponse: Data health record terbaru
+
+    Raises:
+        HTTPException 403: Jika bukan role perawat atau ibu hamil tidak ditugaskan ke perawat ini
+        HTTPException 404: Jika profil perawat tidak ditemukan, ibu hamil tidak ditemukan, atau belum ada health record
+    """
+    # Cari perawat berdasarkan user_id
+    perawat = crud_perawat.get_by_user_id(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil perawat tidak ditemukan untuk user ini",
+        )
+
+    # Cari ibu hamil berdasarkan ID
+    ibu = crud_ibu_hamil.get(db, id=ibu_id)
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ibu hamil tidak ditemukan",
+        )
+
+    # Validasi bahwa ibu hamil ditugaskan ke perawat ini
+    if ibu.perawat_id != perawat.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki akses ke data ibu hamil ini",
+        )
+
+    # Get latest health record
+    latest_record = crud_health_record.get_latest(db, ibu_hamil_id=ibu.id)
+    if not latest_record:
+        raise HealthRecordNotFoundException()
+
+    return HealthRecordResponse.model_validate(latest_record)
 
 
 @router.get(
