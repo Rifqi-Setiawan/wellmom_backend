@@ -37,6 +37,9 @@ from app.schemas.ibu_hamil import (
     IbuHamilUpdateIdentitas,
     IbuHamilUpdateKehamilan,
     IbuHamilProfileResponse,
+    MyPerawatResponse,
+    MyPerawatInfo,
+    MyPuskesmasInfo,
     UserUpdateProfile,
 )
 from app.schemas.health_record import HealthRecordResponse, LatestPerawatNotesResponse
@@ -1082,6 +1085,198 @@ async def get_my_profile_full(
     return IbuHamilProfileResponse(
         user=UserResponse.model_validate(current_user),
         ibu_hamil=IbuHamilResponse.model_validate(ibu),
+    )
+
+
+@router.get(
+    "/me/perawat",
+    response_model=MyPerawatResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ambil data perawat pendamping",
+    description="""
+Mengambil data perawat pendamping yang ditugaskan untuk ibu hamil yang sedang login.
+
+Endpoint ini digunakan di homepage ibu hamil untuk menampilkan informasi perawat pendampingnya.
+
+## Akses
+- **Role yang diizinkan:** `ibu_hamil`
+- Hanya dapat mengakses data perawat yang ditugaskan untuk diri sendiri
+
+## Response Fields
+
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| has_perawat | boolean | `true` jika sudah mendapat perawat, `false` jika belum |
+| perawat | object/null | Data perawat (null jika belum mendapat perawat) |
+| puskesmas | object/null | Data puskesmas (null jika belum terdaftar di puskesmas) |
+| message | string | Pesan informatif tentang status penugasan |
+
+### Perawat Info (jika ada)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| id | integer | ID perawat |
+| nama_lengkap | string | Nama lengkap perawat |
+| email | string | Email perawat |
+| nomor_hp | string | Nomor HP perawat untuk dihubungi |
+| profile_photo_url | string/null | URL foto profil perawat |
+
+### Puskesmas Info (jika ada)
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| id | integer | ID puskesmas |
+| name | string | Nama puskesmas |
+| address | string/null | Alamat puskesmas |
+| phone | string/null | Nomor telepon puskesmas |
+
+## Kondisi Response
+
+1. **Sudah mendapat perawat**: `has_perawat=true`, data perawat dan puskesmas tersedia
+2. **Belum mendapat perawat tapi sudah terdaftar di puskesmas**: `has_perawat=false`, perawat=null, puskesmas tersedia
+3. **Belum terdaftar di puskesmas manapun**: `has_perawat=false`, perawat=null, puskesmas=null
+
+## Error Handling
+- **401**: Token tidak valid atau expired
+- **403**: User bukan ibu hamil
+- **404**: Profil ibu hamil tidak ditemukan
+""",
+    responses={
+        200: {
+            "description": "Data perawat berhasil diambil",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "with_perawat": {
+                            "summary": "Sudah mendapat perawat",
+                            "value": {
+                                "has_perawat": True,
+                                "perawat": {
+                                    "id": 1,
+                                    "nama_lengkap": "Siti Nurhaliza",
+                                    "email": "siti.nurhaliza@puskesmas.go.id",
+                                    "nomor_hp": "+6281234567890",
+                                    "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg"
+                                },
+                                "puskesmas": {
+                                    "id": 1,
+                                    "name": "Puskesmas Hamparan Pugu",
+                                    "address": "Jl. Raya No. 1",
+                                    "phone": "021-1234567"
+                                },
+                                "message": "Anda sudah mendapatkan perawat pendamping"
+                            }
+                        },
+                        "no_perawat": {
+                            "summary": "Belum mendapat perawat",
+                            "value": {
+                                "has_perawat": False,
+                                "perawat": None,
+                                "puskesmas": {
+                                    "id": 1,
+                                    "name": "Puskesmas Hamparan Pugu",
+                                    "address": "Jl. Raya No. 1",
+                                    "phone": "021-1234567"
+                                },
+                                "message": "Anda belum mendapatkan perawat pendamping. Silakan tunggu penugasan dari puskesmas."
+                            }
+                        },
+                        "no_puskesmas": {
+                            "summary": "Belum terdaftar di puskesmas",
+                            "value": {
+                                "has_perawat": False,
+                                "perawat": None,
+                                "puskesmas": None,
+                                "message": "Anda belum terdaftar di puskesmas manapun. Silakan hubungi puskesmas terdekat."
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "Bukan role ibu_hamil",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Hanya ibu hamil yang dapat mengakses endpoint ini"}
+                }
+            }
+        },
+        404: {
+            "description": "Profil ibu hamil tidak ditemukan",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Profil Ibu Hamil tidak ditemukan"}
+                }
+            }
+        }
+    }
+)
+async def get_my_perawat(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> MyPerawatResponse:
+    """
+    Mengambil data perawat pendamping untuk ibu hamil yang sedang login.
+
+    Returns:
+        MyPerawatResponse: Data perawat dan puskesmas (jika ada)
+
+    Raises:
+        HTTPException 403: Jika bukan role ibu_hamil
+        HTTPException 404: Jika profil ibu hamil tidak ditemukan
+    """
+    # Hanya ibu hamil yang dapat mengakses
+    if current_user.role != "ibu_hamil":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya ibu hamil yang dapat mengakses endpoint ini",
+        )
+
+    # Find IbuHamil linked to current user
+    ibu = db.scalars(select(IbuHamil).where(IbuHamil.user_id == current_user.id)).first()
+    if not ibu:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profil Ibu Hamil tidak ditemukan",
+        )
+
+    # Get puskesmas info if assigned
+    puskesmas_info = None
+    if ibu.puskesmas_id:
+        puskesmas = crud_puskesmas.get(db, id=ibu.puskesmas_id)
+        if puskesmas:
+            puskesmas_info = MyPuskesmasInfo(
+                id=puskesmas.id,
+                name=puskesmas.name,
+                address=puskesmas.address,
+                phone=puskesmas.phone,
+            )
+
+    # Get perawat info if assigned
+    perawat_info = None
+    if ibu.perawat_id:
+        perawat = crud_perawat.get(db, id=ibu.perawat_id)
+        if perawat:
+            perawat_info = MyPerawatInfo(
+                id=perawat.id,
+                nama_lengkap=perawat.nama_lengkap,
+                email=perawat.email,
+                nomor_hp=perawat.nomor_hp,
+                profile_photo_url=perawat.profile_photo_url,
+            )
+
+    # Determine message based on status
+    if perawat_info:
+        message = "Anda sudah mendapatkan perawat pendamping"
+    elif puskesmas_info:
+        message = "Anda belum mendapatkan perawat pendamping. Silakan tunggu penugasan dari puskesmas."
+    else:
+        message = "Anda belum terdaftar di puskesmas manapun. Silakan hubungi puskesmas terdekat."
+
+    return MyPerawatResponse(
+        has_perawat=perawat_info is not None,
+        perawat=perawat_info,
+        puskesmas=puskesmas_info,
+        message=message,
     )
 
 

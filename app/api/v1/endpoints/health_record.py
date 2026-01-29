@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.ibu_hamil import IbuHamil
 from app.schemas.health_record import (
     HealthRecordCreate,
+    HealthRecordSelfCreate,
     HealthRecordUpdate,
     HealthRecordResponse,
     HealthRecordListResponse,
@@ -191,6 +192,62 @@ def create_health_record(
     health_record_create = HealthRecordCreate(**create_data)
 
     record = crud_health_record.create(db, obj_in=health_record_create)
+    return HealthRecordResponse.model_validate(record)
+
+
+@router.post(
+    "/self",
+    response_model=HealthRecordResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ibu hamil menambahkan health record sendiri",
+    description="""
+    Endpoint khusus untuk ibu hamil menambahkan health record sendiri.
+
+    Sama dengan endpoint `POST /health-records/` tetapi tanpa field `ibu_hamil_id` karena
+    `ibu_hamil_id` akan diambil otomatis dari profil ibu hamil yang login.
+
+    **Required fields:**
+    - checkup_date: Tanggal pemeriksaan (YYYY-MM-DD)
+    - checked_by: Siapa yang memeriksa ('perawat' atau 'mandiri')
+    - blood_pressure_systolic: Tekanan darah sistolik
+    - blood_pressure_diastolic: Tekanan darah diastolik
+    - heart_rate: Detak jantung (bpm)
+    - body_temperature: Suhu tubuh (Celsius)
+    - weight: Berat badan (kg)
+    - complaints: Keluhan
+
+    **Optional fields:**
+    - perawat_id: ID perawat (jika diperiksa oleh perawat)
+    - gestational_age_weeks, gestational_age_days: Usia kehamilan
+    - hemoglobin: Kadar hemoglobin (g/dL)
+    - blood_glucose: Gula darah (mg/dL)
+    - protein_urin: Protein urin (negatif, +1, +2, +3, +4)
+    - upper_arm_circumference: Lingkar lengan atas / LILA (cm)
+    - fundal_height: Tinggi fundus uteri (cm)
+    - fetal_heart_rate: Denyut jantung janin (bpm)
+    - notes: Catatan tambahan
+
+    **Access:**
+    - Ibu Hamil: Hanya dapat menambahkan health record untuk diri sendiri
+    """,
+)
+def create_self_health_record(
+    health_record_in: HealthRecordSelfCreate,
+    current_user: User = Depends(require_role("ibu_hamil")),
+    db: Session = Depends(get_db),
+) -> HealthRecordResponse:
+    """Create health record by ibu hamil."""
+    # Get ibu_hamil profile from current user
+    ibu_hamil = _get_ibu_hamil_by_user_id(db, current_user.id)
+
+    # Build create data with ibu_hamil_id from logged in user
+    create_data = health_record_in.model_dump()
+    create_data["ibu_hamil_id"] = ibu_hamil.id
+
+    # Create the health record
+    health_record_create = HealthRecordCreate(**create_data)
+    record = crud_health_record.create(db, obj_in=health_record_create)
+
     return HealthRecordResponse.model_validate(record)
 
 
@@ -500,5 +557,5 @@ def delete_health_record(
 
     _authorize_write_access(db, record.ibu_hamil_id, current_user)
 
-    crud_health_record.remove(db, id=record_id)
+    crud_health_record.delete(db, id=record_id)
     return {"message": "Health record berhasil dihapus.", "id": record_id}

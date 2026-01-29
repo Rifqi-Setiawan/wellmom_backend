@@ -10,8 +10,8 @@ from passlib.context import CryptContext
 from app.config import settings
 
 
-# Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing context - supports PBKDF2 (primary) and bcrypt (legacy)
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
 # JWT settings
 ALGORITHM = "HS256"
@@ -19,16 +19,25 @@ ACCESS_TOKEN_EXPIRE_DAYS = 30
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt."""
-    # Truncate to 72 bytes (bcrypt limit)
+    """Hash a password using PBKDF2 (primary) or bcrypt (fallback)."""
+    # Truncate to 72 bytes (bcrypt limit, kept for compatibility)
     password = password[:72]
-    return pwd_context.hash(password)
+    try:
+        return pwd_context.hash(password)
+    except ValueError:
+        # Fallback to PBKDF2 if there's an issue
+        fallback_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+        return fallback_ctx.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against a hashed password."""
     plain_password = plain_password[:72]
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except ValueError:
+        # Return False if the hash scheme is unsupported
+        return False
 
 
 def create_access_token(

@@ -521,3 +521,183 @@ class SetRiskLevelResponse(BaseModel):
             "risk_level_set_at": "2026-01-21T10:30:00"
         }
     })
+
+
+# ============================================
+# PROFILE SETTINGS SCHEMAS (Self-service)
+# ============================================
+class PerawatPuskesmasInfo(BaseModel):
+    """Info puskesmas untuk response profile perawat."""
+    id: int
+    name: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PerawatProfileResponse(BaseModel):
+    """Response lengkap untuk profile perawat (self-service /me endpoint)."""
+    id: int
+    user_id: int
+    nama_lengkap: str
+    email: str
+    nomor_hp: str
+    nip: str
+    profile_photo_url: Optional[str] = None
+    is_active: bool
+    current_patients: int = 0
+    puskesmas: Optional[PerawatPuskesmasInfo] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": 1,
+                "user_id": 10,
+                "nama_lengkap": "Siti Nurhaliza",
+                "email": "siti.nurhaliza@puskesmas.go.id",
+                "nomor_hp": "+6281234567890",
+                "nip": "198501012015011001",
+                "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg",
+                "is_active": True,
+                "current_patients": 5,
+                "puskesmas": {
+                    "id": 1,
+                    "name": "Puskesmas Hamparan Pugu",
+                    "address": "Jl. Raya No. 1",
+                    "phone": "021-1234567"
+                },
+                "created_at": "2025-01-01T10:00:00Z",
+                "updated_at": "2025-01-02T11:00:00Z"
+            }
+        }
+    )
+
+
+class PerawatProfileUpdate(BaseModel):
+    """Schema untuk perawat update profile sendiri (self-service).
+
+    Field yang dapat diupdate oleh perawat sendiri:
+    - nama_lengkap: Nama lengkap
+    - nomor_hp: Nomor HP
+    - profile_photo_url: URL foto profil (setelah upload)
+    """
+    nama_lengkap: Optional[str] = Field(None, min_length=3, max_length=255)
+    nomor_hp: Optional[str] = Field(None, min_length=10, max_length=20)
+    profile_photo_url: Optional[str] = Field(None, max_length=500)
+
+    @field_validator('nomor_hp')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        cleaned = v.replace(' ', '').replace('-', '')
+        if not cleaned.replace('+', '').isdigit():
+            raise ValueError('Nomor HP hanya boleh berisi angka')
+        if len(cleaned) < 10 or len(cleaned) > 15:
+            raise ValueError('Nomor HP harus 10-15 digit')
+        return cleaned
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "nama_lengkap": "Siti Nurhaliza Binti Ahmad",
+            "nomor_hp": "+6281234567890",
+            "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg"
+        }
+    })
+
+
+class PerawatUserUpdate(BaseModel):
+    """Schema untuk perawat update credentials user (email, password).
+
+    Untuk keamanan, perubahan email atau password membutuhkan current_password.
+    """
+    email: Optional[EmailStr] = Field(None, description="Email baru")
+    new_password: Optional[str] = Field(None, min_length=6, description="Password baru (minimal 6 karakter)")
+    current_password: str = Field(..., min_length=1, description="Password saat ini (wajib untuk verifikasi)")
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "email": "new.email@puskesmas.go.id",
+            "new_password": "NewSecurePassword123!",
+            "current_password": "OldPassword123"
+        }
+    })
+
+
+class PerawatPatientItem(BaseModel):
+    """Item pasien untuk daftar pasien perawat."""
+    id: int
+    nama_lengkap: str
+    nik: Optional[str] = None
+    nomor_hp: Optional[str] = None
+    tanggal_lahir: Optional[str] = None
+    usia_kehamilan_minggu: Optional[int] = None
+    usia_kehamilan_hari: Optional[int] = None
+    hpht: Optional[str] = None
+    hpl: Optional[str] = None
+    risk_level: Optional[str] = None
+    profile_photo_url: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[str] = None
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": 1,
+            "nama_lengkap": "Siti Aminah",
+            "nik": "1234567890123456",
+            "nomor_hp": "+6281234567890",
+            "tanggal_lahir": "1995-05-15",
+            "usia_kehamilan_minggu": 28,
+            "usia_kehamilan_hari": 3,
+            "hpht": "2025-06-01",
+            "hpl": "2026-03-08",
+            "risk_level": "rendah",
+            "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_1.jpg",
+            "is_active": True,
+            "created_at": "2025-01-01T10:00:00"
+        }
+    })
+
+
+class PerawatPatientsResponse(BaseModel):
+    """Response untuk endpoint list pasien perawat."""
+    perawat_id: int
+    perawat_nama: str
+    total_patients: int
+    patients_by_risk: dict = Field(default_factory=dict, description="Jumlah pasien per tingkat risiko")
+    patients: list[PerawatPatientItem]
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "perawat_id": 1,
+            "perawat_nama": "Siti Nurhaliza",
+            "total_patients": 5,
+            "patients_by_risk": {
+                "rendah": 3,
+                "sedang": 1,
+                "tinggi": 1,
+                "belum_ditentukan": 0
+            },
+            "patients": [
+                {
+                    "id": 1,
+                    "nama_lengkap": "Siti Aminah",
+                    "nik": "1234567890123456",
+                    "nomor_hp": "+6281234567890",
+                    "tanggal_lahir": "1995-05-15",
+                    "usia_kehamilan_minggu": 28,
+                    "usia_kehamilan_hari": 3,
+                    "hpht": "2025-06-01",
+                    "hpl": "2026-03-08",
+                    "risk_level": "rendah",
+                    "profile_photo_url": None,
+                    "is_active": True,
+                    "created_at": "2025-01-01T10:00:00"
+                }
+            ]
+        }
+    })

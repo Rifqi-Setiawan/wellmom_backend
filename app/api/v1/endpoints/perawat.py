@@ -41,6 +41,13 @@ from app.schemas.perawat import (
     MyNurseItem,
     SetRiskLevelRequest,
     SetRiskLevelResponse,
+    # Profile Settings Schemas
+    PerawatProfileResponse,
+    PerawatProfileUpdate,
+    PerawatUserUpdate,
+    PerawatPatientsResponse,
+    PerawatPatientItem,
+    PerawatPuskesmasInfo,
 )
 from app.schemas.user import UserCreate
 
@@ -364,6 +371,426 @@ def reset_password_perawat(
         "message": "Password berhasil diubah",
         "user_id": current_user.id,
     }
+
+
+# ============================================
+# PROFILE SETTINGS ENDPOINTS (Self-service)
+# ============================================
+
+@router.get(
+    "/me",
+    response_model=PerawatProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Lihat profile perawat sendiri",
+    description="""
+Endpoint untuk perawat melihat profile mereka sendiri.
+
+## Autentikasi
+- Membutuhkan token dengan role `perawat`
+
+## Response meliputi:
+- **Data pribadi**: nama, email, nomor HP, NIP
+- **Foto profile**: URL foto jika ada
+- **Info puskesmas**: nama dan alamat puskesmas tempat bekerja
+- **Statistik**: jumlah pasien yang sedang ditangani
+- **Timestamps**: waktu pembuatan dan update terakhir
+    """,
+    responses={
+        200: {
+            "description": "Profile perawat berhasil diambil",
+            "model": PerawatProfileResponse
+        },
+        401: {
+            "description": "Token tidak valid atau expired"
+        },
+        404: {
+            "description": "Data perawat tidak ditemukan"
+        }
+    }
+)
+def get_my_profile(
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> PerawatProfileResponse:
+    """Get current perawat's own profile."""
+    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini"
+        )
+
+    # Build puskesmas info
+    puskesmas_info = None
+    if perawat.puskesmas:
+        puskesmas_info = PerawatPuskesmasInfo(
+            id=perawat.puskesmas.id,
+            name=perawat.puskesmas.name,
+            address=perawat.puskesmas.address if hasattr(perawat.puskesmas, 'address') else None,
+            phone=perawat.puskesmas.phone if hasattr(perawat.puskesmas, 'phone') else None,
+        )
+
+    return PerawatProfileResponse(
+        id=perawat.id,
+        user_id=perawat.user_id,
+        nama_lengkap=perawat.nama_lengkap,
+        email=perawat.email,
+        nomor_hp=perawat.nomor_hp,
+        nip=perawat.nip,
+        profile_photo_url=perawat.profile_photo_url,
+        is_active=perawat.is_active,
+        current_patients=perawat.current_patients or 0,
+        puskesmas=puskesmas_info,
+        created_at=perawat.created_at,
+        updated_at=perawat.updated_at,
+    )
+
+
+@router.patch(
+    "/me/profile",
+    response_model=PerawatProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update profile perawat sendiri",
+    description="""
+Endpoint untuk perawat mengupdate data profile mereka sendiri.
+
+## Autentikasi
+- Membutuhkan token dengan role `perawat`
+
+## Field yang dapat diupdate:
+| Field | Tipe | Validasi | Keterangan |
+|-------|------|----------|------------|
+| `nama_lengkap` | string | Min 3, Max 255 karakter | Nama lengkap perawat |
+| `nomor_hp` | string | 10-15 digit, boleh diawali + | Nomor HP perawat |
+| `profile_photo_url` | string | Max 500 karakter | URL foto profil (setelah upload) |
+
+## Catatan
+- Email dan NIP tidak dapat diubah melalui endpoint ini (gunakan `/me/user` untuk email)
+- Untuk mengupload foto, gunakan endpoint `/upload/perawat/profile-photo` terlebih dahulu
+- Perubahan nomor HP akan disinkronkan ke data user
+    """,
+    responses={
+        200: {
+            "description": "Profile berhasil diupdate",
+            "model": PerawatProfileResponse
+        },
+        400: {
+            "description": "Nomor HP sudah terdaftar"
+        },
+        401: {
+            "description": "Token tidak valid atau expired"
+        },
+        404: {
+            "description": "Data perawat tidak ditemukan"
+        }
+    }
+)
+def update_my_profile(
+    payload: PerawatProfileUpdate,
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> PerawatProfileResponse:
+    """Update current perawat's own profile."""
+    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini"
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Validate phone uniqueness if being updated
+    if "nomor_hp" in update_data and update_data["nomor_hp"] != perawat.nomor_hp:
+        existing_user = crud_user.get_by_phone(db, phone=update_data["nomor_hp"])
+        if existing_user and existing_user.id != perawat.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nomor HP sudah terdaftar"
+            )
+
+    # Update perawat fields
+    for field, value in update_data.items():
+        setattr(perawat, field, value)
+
+    # Also update linked user if relevant fields changed
+    if perawat.user_id:
+        user = crud_user.get(db, perawat.user_id)
+        if user:
+            if "nama_lengkap" in update_data:
+                user.full_name = update_data["nama_lengkap"]
+            if "nomor_hp" in update_data:
+                user.phone = update_data["nomor_hp"]
+            if "profile_photo_url" in update_data:
+                user.profile_photo_url = update_data["profile_photo_url"]
+            db.add(user)
+
+    db.add(perawat)
+
+    try:
+        db.commit()
+        db.refresh(perawat)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengupdate profile: {str(e)}"
+        )
+
+    # Build response
+    puskesmas_info = None
+    if perawat.puskesmas:
+        puskesmas_info = PerawatPuskesmasInfo(
+            id=perawat.puskesmas.id,
+            name=perawat.puskesmas.name,
+            address=perawat.puskesmas.address if hasattr(perawat.puskesmas, 'address') else None,
+            phone=perawat.puskesmas.phone if hasattr(perawat.puskesmas, 'phone') else None,
+        )
+
+    return PerawatProfileResponse(
+        id=perawat.id,
+        user_id=perawat.user_id,
+        nama_lengkap=perawat.nama_lengkap,
+        email=perawat.email,
+        nomor_hp=perawat.nomor_hp,
+        nip=perawat.nip,
+        profile_photo_url=perawat.profile_photo_url,
+        is_active=perawat.is_active,
+        current_patients=perawat.current_patients or 0,
+        puskesmas=puskesmas_info,
+        created_at=perawat.created_at,
+        updated_at=perawat.updated_at,
+    )
+
+
+@router.patch(
+    "/me/user",
+    status_code=status.HTTP_200_OK,
+    summary="Update credentials perawat (email/password)",
+    description="""
+Endpoint untuk perawat mengupdate credentials (email dan/atau password).
+
+## Autentikasi
+- Membutuhkan token dengan role `perawat`
+- **Wajib** menyertakan `current_password` untuk verifikasi
+
+## Field yang dapat diupdate:
+| Field | Tipe | Validasi | Keterangan |
+|-------|------|----------|------------|
+| `email` | string | Format email valid | Email baru |
+| `new_password` | string | Min 6 karakter | Password baru |
+| `current_password` | string | **Wajib** | Password saat ini untuk verifikasi |
+
+## Keamanan
+- Password saat ini harus benar untuk melakukan perubahan
+- Email baru harus unik (belum terdaftar)
+- Perubahan email akan disinkronkan ke data perawat
+
+## Catatan
+- Setelah mengubah password, gunakan password baru untuk login berikutnya
+- Token saat ini tetap valid sampai expired
+    """,
+    responses={
+        200: {
+            "description": "Credentials berhasil diupdate",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Credentials berhasil diupdate",
+                        "updated_fields": ["email", "password"]
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Password salah atau email sudah terdaftar"
+        },
+        401: {
+            "description": "Token tidak valid atau expired"
+        },
+        404: {
+            "description": "Data perawat tidak ditemukan"
+        }
+    }
+)
+def update_my_user_credentials(
+    payload: PerawatUserUpdate,
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update current perawat's user credentials (email/password)."""
+    # Verify current password
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password saat ini salah"
+        )
+
+    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini"
+        )
+
+    updated_fields = []
+
+    # Update email if provided
+    if payload.email and payload.email != current_user.email:
+        # Check email uniqueness
+        existing_user = crud_user.get_by_email(db, email=payload.email)
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email sudah terdaftar"
+            )
+        existing_perawat = crud_perawat.get_by_email(db, email=payload.email)
+        if existing_perawat and existing_perawat.id != perawat.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email sudah terdaftar sebagai perawat lain"
+            )
+
+        # Update email on user and perawat
+        current_user.email = payload.email
+        perawat.email = payload.email
+        updated_fields.append("email")
+
+    # Update password if provided
+    if payload.new_password:
+        updated = crud_user.update_password(db, user_id=current_user.id, new_password=payload.new_password)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Gagal mengubah password"
+            )
+        updated_fields.append("password")
+
+    if not updated_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tidak ada perubahan yang dilakukan. Sertakan email baru atau password baru."
+        )
+
+    # Save changes
+    db.add(current_user)
+    db.add(perawat)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengupdate credentials: {str(e)}"
+        )
+
+    return {
+        "message": "Credentials berhasil diupdate",
+        "updated_fields": updated_fields
+    }
+
+
+@router.get(
+    "/me/patients",
+    response_model=PerawatPatientsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Lihat daftar pasien yang ditangani",
+    description="""
+Endpoint untuk perawat melihat daftar semua ibu hamil yang terdaftar pada mereka.
+
+## Autentikasi
+- Membutuhkan token dengan role `perawat`
+
+## Response meliputi:
+- **Statistik ringkasan**: total pasien, jumlah per tingkat risiko
+- **Daftar pasien**: nama, kontak, usia kehamilan, tingkat risiko, dll
+- **Foto profile**: URL foto jika ada
+
+## Filter pasien
+Semua pasien yang ditampilkan adalah pasien aktif (`is_active = true`).
+
+## Sorting
+Pasien diurutkan berdasarkan:
+1. Tingkat risiko (tinggi → sedang → rendah → belum ditentukan)
+2. HPL terdekat (yang akan melahirkan lebih dulu)
+    """,
+    responses={
+        200: {
+            "description": "Daftar pasien berhasil diambil",
+            "model": PerawatPatientsResponse
+        },
+        401: {
+            "description": "Token tidak valid atau expired"
+        },
+        404: {
+            "description": "Data perawat tidak ditemukan"
+        }
+    }
+)
+def get_my_patients(
+    current_user: User = Depends(require_role("perawat")),
+    db: Session = Depends(get_db),
+) -> PerawatPatientsResponse:
+    """Get list of patients assigned to current perawat."""
+    perawat = _get_perawat_by_user(db, user_id=current_user.id)
+    if not perawat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data perawat tidak ditemukan untuk akun ini"
+        )
+
+    # Get all patients assigned to this perawat
+    patients = crud_ibu_hamil.get_by_perawat(db, perawat_id=perawat.id)
+
+    # Count by risk level
+    risk_counts = {
+        "rendah": 0,
+        "sedang": 0,
+        "tinggi": 0,
+        "belum_ditentukan": 0
+    }
+
+    patient_items = []
+    for patient in patients:
+        # Count risk levels
+        if patient.risk_level:
+            risk_level = patient.risk_level.lower()
+            if risk_level in risk_counts:
+                risk_counts[risk_level] += 1
+            else:
+                risk_counts["belum_ditentukan"] += 1
+        else:
+            risk_counts["belum_ditentukan"] += 1
+
+        # Build patient item
+        patient_items.append(PerawatPatientItem(
+            id=patient.id,
+            nama_lengkap=patient.nama_lengkap,
+            nik=patient.nik if hasattr(patient, 'nik') else None,
+            nomor_hp=patient.nomor_hp if hasattr(patient, 'nomor_hp') else None,
+            tanggal_lahir=patient.tanggal_lahir.isoformat() if hasattr(patient, 'tanggal_lahir') and patient.tanggal_lahir else None,
+            usia_kehamilan_minggu=patient.usia_kehamilan_minggu if hasattr(patient, 'usia_kehamilan_minggu') else None,
+            usia_kehamilan_hari=patient.usia_kehamilan_hari if hasattr(patient, 'usia_kehamilan_hari') else None,
+            hpht=patient.hpht.isoformat() if hasattr(patient, 'hpht') and patient.hpht else None,
+            hpl=patient.hpl.isoformat() if hasattr(patient, 'hpl') and patient.hpl else None,
+            risk_level=patient.risk_level,
+            profile_photo_url=patient.profile_photo_url if hasattr(patient, 'profile_photo_url') else None,
+            is_active=patient.is_active if hasattr(patient, 'is_active') else True,
+            created_at=patient.created_at.isoformat() if hasattr(patient, 'created_at') and patient.created_at else None,
+        ))
+
+    # Sort by risk level (tinggi first) and then by HPL
+    risk_order = {"tinggi": 0, "sedang": 1, "rendah": 2, None: 3}
+    patient_items.sort(key=lambda p: (risk_order.get(p.risk_level.lower() if p.risk_level else None, 3), p.hpl or "9999-12-31"))
+
+    return PerawatPatientsResponse(
+        perawat_id=perawat.id,
+        perawat_nama=perawat.nama_lengkap,
+        total_patients=len(patient_items),
+        patients_by_risk=risk_counts,
+        patients=patient_items
+    )
 
 
 @router.get(

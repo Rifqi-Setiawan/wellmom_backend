@@ -76,6 +76,71 @@ class HealthRecordCreate(HealthRecordBase):
     })
 
 
+class HealthRecordSelfCreate(BaseModel):
+    """
+    Schema untuk ibu hamil menambahkan health record sendiri.
+
+    Sama dengan HealthRecordCreate tetapi tanpa field ibu_hamil_id karena:
+    - ibu_hamil_id akan diambil otomatis dari user yang login
+    """
+    perawat_id: Optional[int] = None
+    checkup_date: date
+    checked_by: str  # 'perawat' or 'mandiri'
+
+    # Gestational Age
+    gestational_age_weeks: Optional[int] = None
+    gestational_age_days: Optional[int] = None
+
+    # Required Vital Signs (wajib diisi)
+    blood_pressure_systolic: int
+    blood_pressure_diastolic: int
+    heart_rate: int
+    body_temperature: float
+    weight: float  # berat badan (kg)
+    complaints: str  # keluhan
+
+    # Optional Lab/Puskesmas Data (tidak wajib)
+    hemoglobin: Optional[float] = None  # g/dL
+    blood_glucose: Optional[float] = None  # gula darah (mg/dL)
+    protein_urin: Optional[str] = None  # negatif, +1, +2, +3, +4
+    upper_arm_circumference: Optional[float] = None  # lingkar lengan atas / LILA (cm)
+    fundal_height: Optional[float] = None  # tinggi fundus uteri (cm)
+    fetal_heart_rate: Optional[int] = None  # denyut jantung janin (bpm)
+
+    # Additional Notes
+    notes: Optional[str] = None
+
+    @field_validator("checked_by")
+    @classmethod
+    def validate_checked_by(cls, v: str) -> str:
+        if v not in CHECKED_BY_VALUES:
+            raise ValueError(f"checked_by must be one of {sorted(CHECKED_BY_VALUES)}")
+        return v
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "perawat_id": None,
+            "checkup_date": "2025-02-15",
+            "checked_by": "mandiri",
+            "gestational_age_weeks": 28,
+            "gestational_age_days": 3,
+            "blood_pressure_systolic": 120,
+            "blood_pressure_diastolic": 80,
+            "heart_rate": 72,
+            "body_temperature": 36.8,
+            "weight": 65.5,
+            "complaints": "Tidak ada keluhan",
+            "hemoglobin": 12.5,
+            "blood_glucose": 95.0,
+            "protein_urin": "negatif",
+            "upper_arm_circumference": 25.0,
+            "fundal_height": 28.0,
+            "fetal_heart_rate": 140,
+            "notes": "Pemeriksaan mandiri di rumah",
+        }
+    })
+
+
 class HealthRecordUpdate(BaseModel):
     perawat_id: Optional[int] = None
     checkup_date: Optional[date] = None

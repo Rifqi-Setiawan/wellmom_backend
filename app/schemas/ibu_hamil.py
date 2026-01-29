@@ -717,3 +717,87 @@ class IbuHamilUpdateKehamilan(BaseModel):
             }
         }
     })
+
+
+# ============================================================================
+# MY PERAWAT SCHEMAS (for Ibu Hamil Homepage)
+# ============================================================================
+
+class MyPerawatInfo(BaseModel):
+    """Info perawat untuk homepage ibu hamil."""
+    id: int
+    nama_lengkap: str
+    email: str
+    nomor_hp: str
+    profile_photo_url: Optional[str] = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": 1,
+                "nama_lengkap": "Siti Nurhaliza",
+                "email": "siti.nurhaliza@puskesmas.go.id",
+                "nomor_hp": "+6281234567890",
+                "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg"
+            }
+        }
+    )
+
+
+class MyPuskesmasInfo(BaseModel):
+    """Info puskesmas untuk homepage ibu hamil."""
+    id: int
+    name: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": 1,
+                "name": "Puskesmas Hamparan Pugu",
+                "address": "Jl. Raya No. 1, Kec. Hamparan Pugu",
+                "phone": "021-1234567"
+            }
+        }
+    )
+
+
+class MyPerawatResponse(BaseModel):
+    """Response untuk data perawat bagi ibu hamil.
+
+    Digunakan di homepage ibu hamil untuk menampilkan data perawat yang ditugaskan.
+    Jika ibu hamil belum mendapatkan perawat, field `has_perawat` akan bernilai False
+    dan field `perawat` akan bernilai null.
+
+    **Kondisi Response:**
+    1. Sudah mendapat perawat: has_perawat=true, perawat dan puskesmas tersedia
+    2. Belum mendapat perawat (tapi sudah di puskesmas): has_perawat=false, perawat=null, puskesmas tersedia
+    3. Belum terdaftar di puskesmas: has_perawat=false, perawat=null, puskesmas=null
+    """
+    has_perawat: bool
+    perawat: Optional[MyPerawatInfo] = None
+    puskesmas: Optional[MyPuskesmasInfo] = None
+    message: str
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "has_perawat": True,
+            "perawat": {
+                "id": 1,
+                "nama_lengkap": "Siti Nurhaliza",
+                "email": "siti.nurhaliza@puskesmas.go.id",
+                "nomor_hp": "+6281234567890",
+                "profile_photo_url": "/uploads/photos/profiles/perawat/perawat_1.jpg"
+            },
+            "puskesmas": {
+                "id": 1,
+                "name": "Puskesmas Hamparan Pugu",
+                "address": "Jl. Raya No. 1",
+                "phone": "021-1234567"
+            },
+            "message": "Anda sudah mendapatkan perawat pendamping"
+        }
+    })
