@@ -1,25 +1,40 @@
 """Kerabat (Family Member) endpoints."""
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db
 from app.core.security import create_access_token
 from app.crud import crud_kerabat, crud_user
+from app.crud.health_record import crud_health_record
+from app.crud.notification import crud_notification
 from app.models.ibu_hamil import IbuHamil
 from app.models.kerabat import KerabatIbuHamil
+from app.models.perawat import Perawat
+from app.models.puskesmas import Puskesmas
 from app.models.user import User
 from app.schemas.kerabat import (
+    EmergencyContact,
+    IbuHamilSummary,
     InviteCodeGenerateResponse,
     InviteCodeLoginRequest,
     InviteCodeLoginResponse,
     KerabatCompleteProfileRequest,
+    KerabatDashboardResponse,
+    KerabatHealthRecordListResponse,
+    KerabatNotificationListResponse,
+    KerabatProfileResponse,
     KerabatResponse,
     KerabatUpdate,
+    LatestHealthRecordSummary,
+    MarkNotificationReadRequest,
+    MarkNotificationReadResponse,
 )
+from app.schemas.health_record import HealthRecordResponse
+from app.schemas.notification import NotificationResponse
 
 router = APIRouter(
     prefix="/kerabat",
@@ -222,12 +237,12 @@ async def login_with_invite_code(
             )
     else:
         # Create new user account with role 'kerabat'
-        # Generate temporary phone number based on invite code (unique)
-        # Format: +62 + invite_code (8 chars) + random 4 digits
+        # Generate temporary phone number using only digits (for phone validation)
+        # Format: +62 + "9999" (kerabat prefix) + random 8 digits = 12 digits total
         import random
-        random_suffix = f"{random.randint(1000, 9999)}"
-        temp_phone = f"+62{kerabat.invite_code}{random_suffix}"
-        
+        random_digits = f"{random.randint(10000000, 99999999)}"
+        temp_phone = f"+629999{random_digits}"
+
         # Ensure phone is unique (retry if needed)
         max_attempts = 5
         for attempt in range(max_attempts):
@@ -235,8 +250,8 @@ async def login_with_invite_code(
             if not existing_user:
                 break
             if attempt < max_attempts - 1:
-                random_suffix = f"{random.randint(1000, 9999)}"
-                temp_phone = f"+62{kerabat.invite_code}{random_suffix}"
+                random_digits = f"{random.randint(10000000, 99999999)}"
+                temp_phone = f"+629999{random_digits}"
         
         # Create new user
         from app.schemas.user import UserCreate
@@ -475,8 +490,355 @@ async def get_my_kerabat(
     
     # Get all kerabat
     kerabat_list = crud_kerabat.get_by_ibu_hamil(db, ibu_hamil_id=ibu.id)
-    
+
     return [KerabatResponse.model_validate(k) for k in kerabat_list]
+
+
+# ============================================================================
+# KERABAT DASHBOARD & FEATURE ENDPOINTS
+# ============================================================================
+
+
+def _get_kerabat_and_ibu_hamil(current_user: User, db: Session):
+    """Helper untuk mendapatkan data kerabat dan ibu hamil."""
+    if current_user.role != "kerabat":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya kerabat yang dapat mengakses endpoint ini",
+        )
+
+    kerabat = db.scalars(
+        select(KerabatIbuHamil).where(KerabatIbuHamil.kerabat_user_id == current_user.id)
+    ).first()
+
+    if not kerabat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kerabat tidak ditemukan. Pastikan Anda sudah login dengan invitation code.",
+        )
+
+    ibu_hamil = db.get(IbuHamil, kerabat.ibu_hamil_id)
+    if not ibu_hamil:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Data ibu hamil tidak ditemukan",
+        )
+
+    return kerabat, ibu_hamil
+
+
+@router.get(
+    "/me",
+    response_model=KerabatProfileResponse,
+    summary="Get profile kerabat yang sedang login",
+)
+async def get_my_profile(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> KerabatProfileResponse:
+    """Get profile kerabat yang sedang login."""
+    kerabat, ibu_hamil = _get_kerabat_and_ibu_hamil(current_user, db)
+
+    return KerabatProfileResponse(
+        id=kerabat.id,
+        user_id=current_user.id,
+        full_name=current_user.full_name,
+        phone=current_user.phone if not current_user.phone.startswith("+629999") else None,
+        relation_type=kerabat.relation_type,
+        ibu_hamil_id=ibu_hamil.id,
+        ibu_hamil_name=ibu_hamil.nama_lengkap,
+        can_view_records=kerabat.can_view_records,
+        can_receive_notifications=kerabat.can_receive_notifications,
+        created_at=kerabat.created_at,
+    )
+
+
+@router.get(
+    "/dashboard",
+    response_model=KerabatDashboardResponse,
+    summary="Dashboard kerabat dengan ringkasan info ibu hamil",
+)
+async def get_dashboard(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> KerabatDashboardResponse:
+    """Dashboard kerabat: info ibu hamil, health record terbaru, kontak darurat."""
+    kerabat, ibu_hamil = _get_kerabat_and_ibu_hamil(current_user, db)
+
+    if not kerabat.can_view_records:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki izin untuk melihat data ibu hamil",
+        )
+
+    # Get latest health record
+    latest_record = crud_health_record.get_latest(db, ibu_hamil_id=ibu_hamil.id)
+    latest_health_summary = None
+    if latest_record:
+        latest_health_summary = LatestHealthRecordSummary(
+            id=latest_record.id,
+            checkup_date=latest_record.checkup_date,
+            blood_pressure_systolic=latest_record.blood_pressure_systolic,
+            blood_pressure_diastolic=latest_record.blood_pressure_diastolic,
+            heart_rate=latest_record.heart_rate,
+            body_temperature=latest_record.body_temperature,
+            weight=latest_record.weight,
+            complaints=latest_record.complaints,
+            checked_by=latest_record.checked_by,
+            notes=latest_record.notes,
+        )
+
+    # Get emergency contact
+    emergency_contact = EmergencyContact()
+    if ibu_hamil.assigned_perawat_id:
+        perawat = db.get(Perawat, ibu_hamil.assigned_perawat_id)
+        if perawat and perawat.user_id:
+            perawat_user = db.get(User, perawat.user_id)
+            if perawat_user:
+                emergency_contact.perawat_name = perawat_user.full_name
+                emergency_contact.perawat_phone = perawat_user.phone
+
+    if ibu_hamil.puskesmas_id:
+        puskesmas = db.get(Puskesmas, ibu_hamil.puskesmas_id)
+        if puskesmas:
+            emergency_contact.puskesmas_name = puskesmas.name
+            emergency_contact.puskesmas_phone = puskesmas.phone
+            emergency_contact.puskesmas_address = puskesmas.address
+
+    # Get unread notifications count
+    notifications = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=True)
+
+    # Risk alert
+    risk_alert = None
+    if ibu_hamil.risk_level == "tinggi":
+        risk_alert = "PERHATIAN: Ibu hamil memiliki status risiko TINGGI. Segera hubungi perawat jika ada keluhan."
+    elif ibu_hamil.risk_level == "sedang":
+        risk_alert = "INFO: Ibu hamil memiliki status risiko SEDANG. Pastikan pemeriksaan rutin dilakukan."
+
+    ibu_hamil_summary = IbuHamilSummary(
+        id=ibu_hamil.id,
+        nama_lengkap=ibu_hamil.nama_lengkap,
+        usia_kehamilan_minggu=ibu_hamil.usia_kehamilan_minggu,
+        usia_kehamilan_hari=ibu_hamil.usia_kehamilan_hari,
+        tanggal_hpht=ibu_hamil.tanggal_hpht,
+        tanggal_taksiran_persalinan=ibu_hamil.tanggal_taksiran_persalinan,
+        risk_level=ibu_hamil.risk_level,
+        risk_level_set_at=ibu_hamil.risk_level_set_at,
+        golongan_darah=ibu_hamil.golongan_darah,
+    )
+
+    return KerabatDashboardResponse(
+        kerabat_id=kerabat.id,
+        kerabat_name=current_user.full_name,
+        relation_type=kerabat.relation_type,
+        ibu_hamil=ibu_hamil_summary,
+        latest_health_record=latest_health_summary,
+        emergency_contact=emergency_contact,
+        unread_notifications_count=len(notifications),
+        risk_alert=risk_alert,
+    )
+
+
+@router.get(
+    "/health-records",
+    response_model=KerabatHealthRecordListResponse,
+    summary="Daftar riwayat health record ibu hamil",
+)
+async def get_health_records(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=50),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> KerabatHealthRecordListResponse:
+    """Get health records history untuk ibu hamil."""
+    kerabat, ibu_hamil = _get_kerabat_and_ibu_hamil(current_user, db)
+
+    if not kerabat.can_view_records:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki izin untuk melihat health record",
+        )
+
+    all_records = crud_health_record.get_by_ibu_hamil(db, ibu_hamil_id=ibu_hamil.id)
+    total = len(all_records)
+
+    start_idx = (page - 1) * per_page
+    paginated_records = all_records[start_idx:start_idx + per_page]
+    records_response = [HealthRecordResponse.model_validate(r) for r in paginated_records]
+
+    return KerabatHealthRecordListResponse(
+        ibu_hamil_id=ibu_hamil.id,
+        ibu_hamil_name=ibu_hamil.nama_lengkap,
+        records=records_response,
+        total=total,
+        page=page,
+        per_page=per_page,
+    )
+
+
+@router.get(
+    "/health-records/{record_id}",
+    response_model=HealthRecordResponse,
+    summary="Detail satu health record",
+)
+async def get_health_record_detail(
+    record_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> HealthRecordResponse:
+    """Get detail satu health record."""
+    kerabat, ibu_hamil = _get_kerabat_and_ibu_hamil(current_user, db)
+
+    if not kerabat.can_view_records:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki izin untuk melihat health record",
+        )
+
+    record = crud_health_record.get(db, record_id)
+    if not record or record.ibu_hamil_id != ibu_hamil.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Health record tidak ditemukan",
+        )
+
+    return HealthRecordResponse.model_validate(record)
+
+
+@router.get(
+    "/notifications",
+    response_model=KerabatNotificationListResponse,
+    summary="Daftar notifikasi kerabat",
+)
+async def get_notifications(
+    unread_only: bool = Query(False),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> KerabatNotificationListResponse:
+    """Get daftar notifikasi kerabat."""
+    if current_user.role != "kerabat":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya kerabat yang dapat mengakses endpoint ini",
+        )
+
+    notifications = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=unread_only)
+    unread = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=True)
+
+    return KerabatNotificationListResponse(
+        notifications=[NotificationResponse.model_validate(n) for n in notifications],
+        total=len(notifications),
+        unread_count=len(unread),
+    )
+
+
+@router.patch(
+    "/notifications/mark-read",
+    response_model=MarkNotificationReadResponse,
+    summary="Tandai notifikasi sudah dibaca",
+)
+async def mark_notifications_read(
+    payload: MarkNotificationReadRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> MarkNotificationReadResponse:
+    """Mark notifications as read."""
+    if current_user.role != "kerabat":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya kerabat yang dapat mengakses endpoint ini",
+        )
+
+    if not payload.notification_ids:
+        count = crud_notification.mark_all_read(db, user_id=current_user.id)
+    else:
+        count = 0
+        for notif_id in payload.notification_ids:
+            notif = crud_notification.get(db, notif_id)
+            if notif and notif.user_id == current_user.id:
+                crud_notification.mark_as_read(db, notification_id=notif_id)
+                count += 1
+
+    return MarkNotificationReadResponse(
+        marked_count=count,
+        message=f"{count} notifikasi berhasil ditandai sudah dibaca",
+    )
+
+
+@router.get(
+    "/risk-status",
+    summary="Status risiko kehamilan ibu hamil",
+)
+async def get_risk_status(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Get risk status ibu hamil dengan rekomendasi."""
+    kerabat, ibu_hamil = _get_kerabat_and_ibu_hamil(current_user, db)
+
+    risk_info = {
+        "ibu_hamil_id": ibu_hamil.id,
+        "ibu_hamil_name": ibu_hamil.nama_lengkap,
+        "risk_level": ibu_hamil.risk_level,
+        "risk_level_set_at": ibu_hamil.risk_level_set_at,
+        "message": "",
+        "recommendations": [],
+    }
+
+    if ibu_hamil.risk_level == "tinggi":
+        risk_info["message"] = "Status risiko kehamilan TINGGI. Diperlukan perhatian khusus."
+        risk_info["recommendations"] = [
+            "Segera hubungi perawat jika ada keluhan",
+            "Lakukan pemeriksaan rutin sesuai jadwal",
+            "Hindari aktivitas fisik yang berat",
+            "Persiapkan transportasi ke fasilitas kesehatan",
+        ]
+    elif ibu_hamil.risk_level == "sedang":
+        risk_info["message"] = "Status risiko kehamilan SEDANG. Perlu pemantauan rutin."
+        risk_info["recommendations"] = [
+            "Lakukan pemeriksaan rutin sesuai jadwal",
+            "Jaga pola makan dan istirahat",
+            "Pantau tekanan darah secara berkala",
+        ]
+    elif ibu_hamil.risk_level == "rendah":
+        risk_info["message"] = "Status risiko kehamilan RENDAH. Tetap jaga kesehatan."
+        risk_info["recommendations"] = [
+            "Lakukan pemeriksaan rutin",
+            "Jaga pola makan sehat",
+            "Olahraga ringan secara teratur",
+        ]
+    else:
+        risk_info["message"] = "Status risiko belum ditentukan oleh perawat."
+        risk_info["recommendations"] = ["Jadwalkan pemeriksaan dengan perawat"]
+
+    return risk_info
+
+
+@router.post(
+    "/logout",
+    summary="Logout kerabat",
+)
+async def logout(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Logout kerabat (hapus token di client)."""
+    if current_user.role != "kerabat":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hanya kerabat yang dapat mengakses endpoint ini",
+        )
+
+    kerabat = db.scalars(
+        select(KerabatIbuHamil).where(KerabatIbuHamil.kerabat_user_id == current_user.id)
+    ).first()
+
+    return {
+        "message": "Logout berhasil",
+        "user_id": current_user.id,
+        "kerabat_id": kerabat.id if kerabat else None,
+        "instruction": "Hapus access token di aplikasi untuk menyelesaikan logout",
+    }
 
 
 __all__ = ["router"]

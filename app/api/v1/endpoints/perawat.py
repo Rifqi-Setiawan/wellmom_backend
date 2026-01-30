@@ -20,7 +20,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_role
 from app.config import settings
 from app.core.security import create_access_token, verify_password
-from app.crud import crud_user, crud_perawat, crud_puskesmas, crud_ibu_hamil
+from app.crud import crud_user, crud_perawat, crud_puskesmas, crud_ibu_hamil, crud_kerabat
+from app.crud.notification import crud_notification
+from app.schemas.notification import NotificationCreate
 from app.models.user import User
 from app.models.perawat import Perawat as PerawatModel
 from app.schemas.perawat import (
@@ -1490,6 +1492,39 @@ def set_patient_risk_level(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Gagal mengupdate tingkat risiko: {str(e)}"
         )
+
+    # Send notification to kerabat if risk level is tinggi or sedang
+    if payload.risk_level in ["tinggi", "sedang"]:
+        kerabat_list = crud_kerabat.get_by_ibu_hamil(db, ibu_hamil_id=ibu_hamil.id)
+        for kerabat in kerabat_list:
+            if kerabat.can_receive_notifications and kerabat.kerabat_user_id:
+                priority = "urgent" if payload.risk_level == "tinggi" else "high"
+                title = f"Status Risiko Kehamilan: {payload.risk_level.upper()}"
+                if payload.risk_level == "tinggi":
+                    message = (
+                        f"PERHATIAN: {ibu_hamil.nama_lengkap} memiliki status risiko kehamilan TINGGI. "
+                        f"Segera hubungi perawat jika ada keluhan. Pantau kondisi secara rutin."
+                    )
+                else:
+                    message = (
+                        f"INFO: {ibu_hamil.nama_lengkap} memiliki status risiko kehamilan SEDANG. "
+                        f"Pastikan pemeriksaan rutin dilakukan sesuai jadwal."
+                    )
+
+                try:
+                    notification_data = NotificationCreate(
+                        user_id=kerabat.kerabat_user_id,
+                        title=title,
+                        message=message,
+                        notification_type="health_alert",
+                        priority=priority,
+                        sent_via="in_app",
+                        related_entity_type="ibu_hamil",
+                        related_entity_id=ibu_hamil.id,
+                    )
+                    crud_notification.create(db, obj_in=notification_data)
+                except Exception:
+                    pass  # Don't fail main operation if notification fails
 
     return SetRiskLevelResponse(
         success=True,
