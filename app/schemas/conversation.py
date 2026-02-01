@@ -41,3 +41,7 @@ class ConversationListResponse(BaseModel):
     """Response for listing conversations."""
     conversations: List[ConversationWithLastMessage]
     total: int
+    total_unread_notifications: Optional[int] = Field(
+        None,
+        description="Total unread notifications for current user (not just chat)"
+    )

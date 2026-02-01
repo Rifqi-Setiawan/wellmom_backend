@@ -2,7 +2,22 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, puskesmas, perawat, ibu_hamil, chat, websocket_chat, health_record, forum, kerabat, chatbot, statistics, statistics, upload
+from app.api.v1.endpoints import (
+    auth,
+    users,
+    puskesmas,
+    perawat,
+    ibu_hamil,
+    chat,
+    websocket_chat,
+    health_record,
+    forum,
+    kerabat,
+    chatbot,
+    statistics,
+    upload,
+    notification,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -19,5 +34,6 @@ api_router.include_router(kerabat.router)
 api_router.include_router(chatbot.router)
 api_router.include_router(statistics.router)
 api_router.include_router(upload.router)
+api_router.include_router(notification.router)
 
 __all__ = ["api_router"]

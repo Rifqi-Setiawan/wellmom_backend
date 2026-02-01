@@ -46,7 +46,20 @@ class Settings(BaseSettings):
     CHATBOT_RATE_LIMIT_PER_MINUTE: int = 10            # Max requests per user per minute
     CHATBOT_REQUEST_TIMEOUT: int = 30                  # Seconds
     CHATBOT_MAX_HISTORY_MESSAGES: int = 20             # Messages to include for context
-    
+
+    # Notification Settings
+    NOTIFICATION_BATCH_SIZE: int = 100                 # Max notifications per request
+    NOTIFICATION_RETENTION_DAYS: int = 90              # Auto-delete after N days
+
+    # WhatsApp Integration (Future)
+    WHATSAPP_API_URL: str | None = None
+    WHATSAPP_API_KEY: str | None = None
+    WHATSAPP_ENABLED: bool = False
+
+    # Push Notification / FCM (Future)
+    FCM_SERVER_KEY: str | None = None
+    FCM_ENABLED: bool = False
+
     class Config:
         env_file = ".env"
         case_sensitive = True

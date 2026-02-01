@@ -28,6 +28,8 @@ from app.schemas.message import (
     MarkReadRequest,
     UnreadCountResponse,
 )
+from app.services.notification_service import notification_service
+from app.api.v1.endpoints.websocket_chat import manager
 
 router = APIRouter(
     prefix="/chat",
@@ -144,9 +146,15 @@ def list_conversations(
         )
         enriched_conversations.append(enriched)
     
+    # Get total unread notifications for this user
+    total_unread_notifications = notification_service.get_unread_count(
+        db, user_id=current_user.id
+    )
+
     return ConversationListResponse(
         conversations=enriched_conversations,
-        total=len(enriched_conversations)
+        total=len(enriched_conversations),
+        total_unread_notifications=total_unread_notifications,
     )
 
 
@@ -338,7 +346,30 @@ def send_message(
     except Exception:
         # WebSocket broadcast is optional, don't fail if it errors
         pass
-    
+
+    # Send notification to recipient if NOT connected to WebSocket
+    try:
+        # Determine recipient user_id
+        if current_user.role == "ibu_hamil":
+            # Message from ibu_hamil to perawat - get perawat's user_id
+            perawat_obj = crud_perawat.get(db, ibu_hamil.perawat_id)
+            recipient_user_id = perawat_obj.user_id if perawat_obj else None
+        else:
+            # Message from perawat to ibu_hamil
+            recipient_user_id = ibu_hamil.user_id
+
+        # Only send notification if recipient is NOT online in WebSocket
+        if recipient_user_id and recipient_user_id not in manager.active_connections:
+            notification_service.create_new_message_notification(
+                db,
+                conversation_id=conversation.id,
+                sender_name=current_user.full_name,
+                recipient_user_id=recipient_user_id,
+            )
+    except Exception:
+        # Notification is optional, don't fail if it errors
+        pass
+
     # Enrich with sender info
     sender = db.get(User, message.sender_user_id)
     return MessageResponse(

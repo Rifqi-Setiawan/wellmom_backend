@@ -23,6 +23,7 @@ from app.core.security import create_access_token, verify_password
 from app.crud import crud_user, crud_perawat, crud_puskesmas, crud_ibu_hamil, crud_kerabat
 from app.crud.notification import crud_notification
 from app.schemas.notification import NotificationCreate
+from app.services.notification_service import notification_service
 from app.models.user import User
 from app.models.perawat import Perawat as PerawatModel
 from app.schemas.perawat import (
@@ -1492,6 +1493,19 @@ def set_patient_risk_level(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Gagal mengupdate tingkat risiko: {str(e)}"
         )
+
+    # Send notification to ibu hamil about risk level change
+    try:
+        notification_service.create_risk_level_notification(
+            db,
+            ibu_hamil_id=ibu_hamil.id,
+            risk_level=payload.risk_level,
+            perawat_name=perawat.nama_lengkap,
+        )
+    except Exception as e:
+        # Log error but don't fail the request
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send risk level notification to ibu hamil: {e}")
 
     # Send notification to kerabat if risk level is tinggi or sedang
     if payload.risk_level in ["tinggi", "sedang"]:

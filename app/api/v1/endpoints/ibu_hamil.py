@@ -1024,7 +1024,11 @@ Digunakan untuk halaman profile setting.
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "location": [101.3912, -2.0645],
-                            "address": "Jl. Mawar No. 10",
+                            "address": "Jl. Mawar No. 10, RT 02 RW 05",
+                            "provinsi": "Jambi",
+                            "kota_kabupaten": "Kerinci",
+                            "kelurahan": "Sungai Penuh",
+                            "kecamatan": "Pesisir Bukit",
                             "is_active": True
                         }
                     }

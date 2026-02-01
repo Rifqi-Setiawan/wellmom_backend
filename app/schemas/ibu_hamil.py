@@ -574,6 +574,8 @@ class IbuHamilProfileResponse(BaseModel):
                 "address": "Jl. Mawar No. 10, RT 02 RW 05",
                 "provinsi": "Jambi",
                 "kota_kabupaten": "Kerinci",
+                "kelurahan": "Sungai Penuh",
+                "kecamatan": "Pesisir Bukit",
                 "is_active": True,
                 "created_at": "2026-01-09T21:18:41.640648",
                 "updated_at": "2026-01-09T21:18:41.640648"
