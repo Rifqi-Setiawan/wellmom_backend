@@ -44,27 +44,25 @@ docker-compose.*.yml
 # Mosquitto config (contains credentials)
 mosquitto.conf
 
+# Uploads (user-uploaded files - not needed in repo)
+uploads/
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Database
 *.db
 *.sqlite3
-*.log
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
-
-# FastAPI specific
-.pytest_cache/
 
 # Logs
 *.log
