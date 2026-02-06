@@ -11,6 +11,7 @@ from sqlalchemy import select, func, update
 from app.models.notification import Notification
 from app.models.ibu_hamil import IbuHamil
 from app.schemas.notification import NotificationCreate
+from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,26 @@ class NotificationService:
                 f"Notification created: id={notification.id}, "
                 f"user_id={user_id}, type={notification_type}, priority={priority}"
             )
+
+            # Send push notification via Firebase
+            try:
+                firebase_service.send_notification_to_user(
+                    db=db,
+                    user_id=user_id,
+                    title=title,
+                    body=message,
+                    data={
+                        "notification_id": str(notification.id),
+                        "notification_type": notification_type,
+                        "priority": priority,
+                        "related_entity_type": related_entity_type or "",
+                        "related_entity_id": str(related_entity_id) if related_entity_id else "",
+                    },
+                    priority=priority,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send push notification: {str(e)}")
+                # Don't fail the whole operation if push notification fails
 
             return notification
 

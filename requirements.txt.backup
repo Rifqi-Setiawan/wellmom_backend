@@ -53,6 +53,3 @@ python-multipart
 shapely
 geoalchemy2
 google-generativeai>=0.8.0
-
-# Firebase Cloud Messaging
-firebase-admin==6.5.0

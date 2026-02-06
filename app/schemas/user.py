@@ -101,6 +101,8 @@ class UserResponse(UserBase):
 	is_active: bool
 	is_verified: bool
 	verification_token: Optional[str] = None
+	fcm_token: Optional[str] = None
+	fcm_token_updated_at: Optional[datetime] = None
 	created_at: datetime
 	updated_at: datetime
 
@@ -115,6 +117,8 @@ class UserResponse(UserBase):
 			"is_active": True,
 			"is_verified": False,
 			"verification_token": "abc123",
+			"fcm_token": "dXBkYXRlZF90b2tlbl9leGFtcGxl...",
+			"fcm_token_updated_at": "2025-01-02T08:00:00Z",
 			"created_at": "2025-01-01T10:00:00Z",
 			"updated_at": "2025-01-02T10:00:00Z",
 		}
@@ -255,5 +259,19 @@ class SuperAdminLoginResponse(BaseModel):
 				"email": "superadmin@wellmom.go.id",
 				"full_name": "Super Admin WellMom"
 			}
+		}
+	})
+
+
+# ============================================
+# FCM Token Schemas
+# ============================================
+
+class FCMTokenUpdate(BaseModel):
+	fcm_token: str
+
+	model_config = ConfigDict(json_schema_extra={
+		"example": {
+			"fcm_token": "dXBkYXRlZF90b2tlbl9leGFtcGxl..."
 		}
 	})

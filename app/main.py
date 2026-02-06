@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +10,10 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db, engine
 from app.api.v1.api import api_router
+from app.services.firebase_service import firebase_service
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -77,6 +82,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Include versioned API router
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on application startup."""
+    firebase_service.initialize()
+    logger.info("Firebase Cloud Messaging initialized")
+
 
 # Root endpoint
 @app.get("/")

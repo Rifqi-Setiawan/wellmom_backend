@@ -31,7 +31,11 @@ class User(Base):
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
-    
+
+    # FCM Token for Push Notifications
+    fcm_token = Column(String(255), nullable=True, index=True)
+    fcm_token_updated_at = Column(TIMESTAMP, nullable=True)
+
     # Constraints
     __table_args__ = (
         CheckConstraint(

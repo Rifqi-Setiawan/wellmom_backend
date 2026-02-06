@@ -33,6 +33,7 @@ env/
 .env.*.local
 
 # Firebase credentials (SENSITIVE - NEVER COMMIT!)
+firebase-credentials.json
 firebase-key.json
 *-firebase-*.json
 serviceAccount*.json

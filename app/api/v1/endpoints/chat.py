@@ -1,5 +1,6 @@
 """Chat endpoints for communication between Ibu Hamil and Perawat."""
 
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -29,7 +30,10 @@ from app.schemas.message import (
     UnreadCountResponse,
 )
 from app.services.notification_service import notification_service
+from app.services.firebase_service import firebase_service
 from app.api.v1.endpoints.websocket_chat import manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/chat",
@@ -366,6 +370,24 @@ def send_message(
                 sender_name=current_user.full_name,
                 recipient_user_id=recipient_user_id,
             )
+
+            # Also send push notification via Firebase
+            try:
+                firebase_service.send_notification_to_user(
+                    db=db,
+                    user_id=recipient_user_id,
+                    title=f"Pesan baru dari {current_user.full_name}",
+                    body=message_in.message_text[:100],
+                    data={
+                        "type": "new_message",
+                        "conversation_id": str(conversation.id),
+                        "sender_id": str(current_user.id),
+                        "sender_name": current_user.full_name,
+                    },
+                    priority="high",
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send push notification for message: {str(e)}")
     except Exception:
         # Notification is optional, don't fail if it errors
         pass

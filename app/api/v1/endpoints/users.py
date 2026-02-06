@@ -1,5 +1,6 @@
 """User endpoints."""
 
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,7 +13,7 @@ from app.api.deps import (
 )
 from app.crud import crud_user
 from app.models.user import User
-from app.schemas.user import UserResponse, UserUpdate
+from app.schemas.user import FCMTokenUpdate, UserResponse, UserUpdate
 
 router = APIRouter(
     prefix="/users",
@@ -205,6 +206,35 @@ async def delete_user(
     crud_user.deactivate(db, user_id=user_id)
     
     return {"message": "User deactivated successfully"}
+
+
+@router.patch(
+    "/me/fcm-token",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update FCM token",
+)
+async def update_fcm_token(
+    token_data: FCMTokenUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Update FCM token for push notifications.
+
+    Args:
+        token_data: FCM token data
+        current_user: Current active user (injected via JWT token)
+        db: Database session
+
+    Returns:
+        User: Updated user data
+    """
+    current_user.fcm_token = token_data.fcm_token
+    current_user.fcm_token_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 
 __all__ = ["router"]

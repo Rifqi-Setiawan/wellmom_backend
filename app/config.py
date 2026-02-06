@@ -56,9 +56,10 @@ class Settings(BaseSettings):
     WHATSAPP_API_KEY: str | None = None
     WHATSAPP_ENABLED: bool = False
 
-    # Push Notification / FCM (Future)
-    FCM_SERVER_KEY: str | None = None
-    FCM_ENABLED: bool = False
+    # Firebase Configuration
+    FIREBASE_CREDENTIALS_PATH: str = "/opt/wellmom/wellmom-backend/firebase-credentials.json"
+    FIREBASE_ENABLED: bool = True
+    FIREBASE_PROJECT_ID: str = "wellmom"
 
     class Config:
         env_file = ".env"
