@@ -1,14 +1,18 @@
 """WebSocket endpoints for real-time chat."""
 
 import json
+import logging
 from typing import Dict, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from starlette.websockets import WebSocketState
 
 from app.api.deps import get_db
 from app.crud import crud_conversation, crud_message, crud_user
 from app.models.user import User
 from app.core.security import decode_token
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:

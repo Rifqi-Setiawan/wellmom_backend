@@ -1,5 +1,6 @@
 """FastAPI dependency injection functions for authentication and database access."""
 
+import logging
 from typing import Callable, Generator, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -10,6 +11,8 @@ from app.core.security import decode_token
 from app.crud import crud_user
 from app.database import SessionLocal
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 # OAuth2 Bearer token scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -36,14 +39,14 @@ def get_current_user(
 ) -> User:
     """
     Dependency to get current authenticated user from JWT token.
-    
+
     Args:
         token: JWT token from Authorization header
         db: Database session
-        
+
     Returns:
         User: Authenticated user model
-        
+
     Raises:
         HTTPException: 401 if token is invalid or user not found
     """
@@ -52,19 +55,31 @@ def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
+    # Debug: Log token prefix for debugging (first 20 chars only for security)
+    token_preview = token[:20] + "..." if len(token) > 20 else token
+    logger.info(f"[AUTH] Validating token: {token_preview}")
+
     try:
         payload = decode_token(token)
         phone: str = payload.get("sub")
+        logger.info(f"[AUTH] Token decoded successfully. Phone from token: {phone}")
         if phone is None:
+            logger.warning("[AUTH] Phone is None in token payload")
             raise credentials_exception
-    except Exception:
+    except HTTPException:
+        logger.warning("[AUTH] Token decode failed (HTTPException from decode_token)")
         raise credentials_exception
-    
+    except Exception as e:
+        logger.warning(f"[AUTH] Token decode failed with exception: {type(e).__name__}: {e}")
+        raise credentials_exception
+
     user = crud_user.get_by_phone(db, phone=phone)
     if user is None:
+        logger.warning(f"[AUTH] User not found for phone: {phone}")
         raise credentials_exception
-    
+
+    logger.info(f"[AUTH] User authenticated: id={user.id}, role={user.role}, phone={user.phone}")
     return user
 
 

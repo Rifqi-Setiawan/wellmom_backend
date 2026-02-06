@@ -139,6 +139,32 @@ class KerabatCompleteProfileRequest(BaseModel):
     })
 
 
+class KerabatCompleteProfileResponse(BaseModel):
+    """Response untuk complete profile kerabat - termasuk token baru jika phone di-update."""
+    kerabat: KerabatResponse
+    access_token: Optional[str] = None  # Token baru jika phone di-update
+    token_type: str = "bearer"
+    message: str = "Profile berhasil diupdate"
+
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "kerabat": {
+                "id": 1,
+                "kerabat_user_id": 25,
+                "ibu_hamil_id": 1,
+                "relation_type": "Suami",
+                "can_view_records": True,
+                "can_receive_notifications": True,
+                "created_at": "2025-01-01T10:00:00Z",
+                "updated_at": "2025-01-02T11:00:00Z"
+            },
+            "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "token_type": "bearer",
+            "message": "Profile berhasil diupdate. Gunakan access_token baru untuk request selanjutnya."
+        }
+    })
+
+
 # ============================================================================
 # KERABAT DASHBOARD & FEATURE SCHEMAS
 # ============================================================================

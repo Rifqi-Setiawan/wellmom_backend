@@ -1,8 +1,11 @@
 """Kerabat (Family Member) endpoints."""
 
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +26,7 @@ from app.schemas.kerabat import (
     InviteCodeLoginRequest,
     InviteCodeLoginResponse,
     KerabatCompleteProfileRequest,
+    KerabatCompleteProfileResponse,
     KerabatDashboardResponse,
     KerabatHealthRecordListResponse,
     KerabatNotificationListResponse,
@@ -294,10 +298,22 @@ async def login_with_invite_code(
     
     # Generate access token
     access_token = create_access_token({"sub": str(user.phone)})
-    
+
+    # Debug logging
+    logger.info(f"[KERABAT_LOGIN] User created/found: id={user.id}, phone={user.phone}, role={user.role}")
+    logger.info(f"[KERABAT_LOGIN] Token generated with sub={user.phone}")
+    logger.info(f"[KERABAT_LOGIN] Kerabat: id={kerabat.id}, kerabat_user_id={kerabat.kerabat_user_id}")
+
+    # Verify user can be found by phone (sanity check)
+    verify_user = crud_user.get_by_phone(db, phone=user.phone)
+    if verify_user:
+        logger.info(f"[KERABAT_LOGIN] Verification: User found by phone lookup, id={verify_user.id}")
+    else:
+        logger.error(f"[KERABAT_LOGIN] Verification FAILED: User NOT found by phone={user.phone}")
+
     # Check if profile needs completion
     requires_completion = kerabat.relation_type is None or user.full_name == "Kerabat"
-    
+
     return InviteCodeLoginResponse(
         access_token=access_token,
         token_type="bearer",
@@ -310,7 +326,7 @@ async def login_with_invite_code(
 
 @router.post(
     "/complete-profile",
-    response_model=KerabatResponse,
+    response_model=KerabatCompleteProfileResponse,
     status_code=status.HTTP_200_OK,
     summary="Complete profile kerabat setelah login",
     description="""
@@ -324,6 +340,9 @@ Complete profile kerabat setelah login dengan invitation code.
 - full_name: Nama lengkap kerabat
 - relation_type: Relasi kepada ibu hamil (contoh: Suami, Ibu, Ayah, dll)
 - phone: Nomor telepon (optional, bisa diisi nanti)
+
+**PENTING:** Jika phone diisi/diupdate, response akan menyertakan `access_token` baru.
+Frontend HARUS menyimpan dan menggunakan token baru ini untuk request selanjutnya.
 """,
     responses={
         200: {
@@ -331,13 +350,17 @@ Complete profile kerabat setelah login dengan invitation code.
             "content": {
                 "application/json": {
                     "example": {
-                        "id": 1,
-                        "kerabat_user_id": 25,
-                        "ibu_hamil_id": 1,
-                        "relation_type": "Suami",
-                        "can_view_records": True,
-                        "can_receive_notifications": True,
-                        "created_at": "2025-01-01T10:00:00Z"
+                        "kerabat": {
+                            "id": 1,
+                            "kerabat_user_id": 25,
+                            "ibu_hamil_id": 1,
+                            "relation_type": "Suami",
+                            "can_view_records": True,
+                            "can_receive_notifications": True
+                        },
+                        "access_token": "eyJhbGciOiJIUzI1NiIs...",
+                        "token_type": "bearer",
+                        "message": "Profile berhasil diupdate. Gunakan access_token baru."
                     }
                 }
             }
@@ -346,7 +369,7 @@ Complete profile kerabat setelah login dengan invitation code.
             "description": "Data tidak valid",
             "content": {
                 "application/json": {
-                    "example": {"detail": "Anda belum login dengan invitation code atau sudah complete profile"}
+                    "example": {"detail": "Nomor telepon sudah terdaftar di sistem"}
                 }
             }
         },
@@ -372,18 +395,18 @@ async def complete_profile(
     profile_data: KerabatCompleteProfileRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
-) -> KerabatResponse:
+) -> KerabatCompleteProfileResponse:
     """
     Complete profile kerabat setelah login dengan invitation code.
-    
+
     Args:
         profile_data: Data profile kerabat (full_name, relation_type, phone)
         current_user: User yang sedang login (harus role kerabat)
         db: Database session
-        
+
     Returns:
-        KerabatResponse: Data kerabat yang sudah di-update
-        
+        KerabatCompleteProfileResponse: Data kerabat + token baru jika phone diupdate
+
     Raises:
         HTTPException 400: Data tidak valid atau sudah complete
         HTTPException 403: Jika bukan role kerabat
@@ -395,30 +418,29 @@ async def complete_profile(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hanya kerabat yang dapat mengakses endpoint ini",
         )
-    
+
     # Find kerabat relationship
     kerabat = db.scalars(
         select(KerabatIbuHamil).where(KerabatIbuHamil.kerabat_user_id == current_user.id)
     ).first()
-    
+
     if not kerabat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Kerabat tidak ditemukan. Pastikan Anda sudah login dengan invitation code.",
         )
-    
-    # Check if already completed (boleh update jika masih "Kerabat" atau relation_type masih null)
-    if kerabat.relation_type and current_user.full_name != "Kerabat" and current_user.full_name:
-        # Boleh update jika ada perubahan
-        pass
-    
+
+    # Track if phone was updated (need to generate new token)
+    phone_updated = False
+    old_phone = current_user.phone
+
     # Update user full_name
     if profile_data.full_name:
         current_user.full_name = profile_data.full_name
         db.add(current_user)
-    
+
     # Update user phone if provided
-    if profile_data.phone:
+    if profile_data.phone and profile_data.phone != current_user.phone:
         # Check if phone already exists
         existing_user = crud_user.get_by_phone(db, phone=profile_data.phone)
         if existing_user and existing_user.id != current_user.id:
@@ -427,12 +449,13 @@ async def complete_profile(
                 detail="Nomor telepon sudah terdaftar di sistem",
             )
         current_user.phone = profile_data.phone
+        phone_updated = True
         db.add(current_user)
-    
+
     # Update kerabat relation_type
     kerabat.relation_type = profile_data.relation_type
     db.add(kerabat)
-    
+
     try:
         db.commit()
         db.refresh(kerabat)
@@ -443,8 +466,21 @@ async def complete_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Gagal mengupdate profile: {str(e)}",
         )
-    
-    return KerabatResponse.model_validate(kerabat)
+
+    # Generate new token if phone was updated
+    new_token = None
+    message = "Profile berhasil diupdate"
+    if phone_updated:
+        new_token = create_access_token({"sub": str(current_user.phone)})
+        message = "Profile berhasil diupdate. Gunakan access_token baru untuk request selanjutnya."
+        logger.info(f"[KERABAT_COMPLETE_PROFILE] Phone updated from {old_phone} to {current_user.phone}, new token generated")
+
+    return KerabatCompleteProfileResponse(
+        kerabat=KerabatResponse.model_validate(kerabat),
+        access_token=new_token,
+        token_type="bearer",
+        message=message,
+    )
 
 
 @router.get(
@@ -590,8 +626,8 @@ async def get_dashboard(
 
     # Get emergency contact
     emergency_contact = EmergencyContact()
-    if ibu_hamil.assigned_perawat_id:
-        perawat = db.get(Perawat, ibu_hamil.assigned_perawat_id)
+    if ibu_hamil.perawat_id:
+        perawat = db.get(Perawat, ibu_hamil.perawat_id)
         if perawat and perawat.user_id:
             perawat_user = db.get(User, perawat.user_id)
             if perawat_user:
@@ -606,7 +642,7 @@ async def get_dashboard(
             emergency_contact.puskesmas_address = puskesmas.address
 
     # Get unread notifications count
-    notifications = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=True)
+    notifications = crud_notification.get_by_user(db, user_id=current_user.id, is_read=False)
 
     # Risk alert
     risk_alert = None
@@ -618,13 +654,13 @@ async def get_dashboard(
     ibu_hamil_summary = IbuHamilSummary(
         id=ibu_hamil.id,
         nama_lengkap=ibu_hamil.nama_lengkap,
-        usia_kehamilan_minggu=ibu_hamil.usia_kehamilan_minggu,
-        usia_kehamilan_hari=ibu_hamil.usia_kehamilan_hari,
-        tanggal_hpht=ibu_hamil.tanggal_hpht,
-        tanggal_taksiran_persalinan=ibu_hamil.tanggal_taksiran_persalinan,
+        usia_kehamilan_minggu=ibu_hamil.usia_kehamilan,  # usia_kehamilan from model
+        usia_kehamilan_hari=None,  # Not stored separately in model
+        tanggal_hpht=ibu_hamil.last_menstrual_period,  # HPHT = last_menstrual_period
+        tanggal_taksiran_persalinan=ibu_hamil.estimated_due_date,  # HPL = estimated_due_date
         risk_level=ibu_hamil.risk_level,
         risk_level_set_at=ibu_hamil.risk_level_set_at,
-        golongan_darah=ibu_hamil.golongan_darah,
+        golongan_darah=ibu_hamil.blood_type,  # golongan_darah = blood_type
     )
 
     return KerabatDashboardResponse(
@@ -722,8 +758,10 @@ async def get_notifications(
             detail="Hanya kerabat yang dapat mengakses endpoint ini",
         )
 
-    notifications = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=unread_only)
-    unread = crud_notification.get_by_user(db, user_id=current_user.id, unread_only=True)
+    # Convert unread_only to is_read parameter
+    is_read_filter = False if unread_only else None
+    notifications = crud_notification.get_by_user(db, user_id=current_user.id, is_read=is_read_filter)
+    unread = crud_notification.get_by_user(db, user_id=current_user.id, is_read=False)
 
     return KerabatNotificationListResponse(
         notifications=[NotificationResponse.model_validate(n) for n in notifications],
