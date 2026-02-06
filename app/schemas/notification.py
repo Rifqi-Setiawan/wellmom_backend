@@ -15,6 +15,7 @@ NOTIFICATION_TYPES = {
     "referral",
     "transfer_update",
     "system",
+    "new_message",
 }
 
 PRIORITIES = {"low", "normal", "high", "urgent"}

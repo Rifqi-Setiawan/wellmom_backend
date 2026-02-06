@@ -43,7 +43,7 @@ class Notification(Base):
     __table_args__ = (
         # Check constraints
         CheckConstraint(
-            "notification_type IN ('checkup_reminder', 'assignment', 'health_alert', 'iot_alert', 'referral', 'transfer_update', 'system')",
+            "notification_type IN ('checkup_reminder', 'assignment', 'health_alert', 'iot_alert', 'referral', 'transfer_update', 'system', 'new_message')",
             name="check_notification_type"
         ),
         CheckConstraint(

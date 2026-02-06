@@ -80,7 +80,7 @@ class NotificationService:
             title: Notification title
             message: Notification message content
             notification_type: Type of notification (checkup_reminder, assignment,
-                             health_alert, iot_alert, referral, transfer_update, system)
+                             health_alert, iot_alert, referral, transfer_update, system, new_message)
             priority: Priority level (low, normal, high, urgent)
             sent_via: Delivery channel (in_app, whatsapp, both)
             related_entity_type: Optional related entity type
@@ -96,7 +96,7 @@ class NotificationService:
         # Validate notification_type
         valid_types = {
             "checkup_reminder", "assignment", "health_alert",
-            "iot_alert", "referral", "transfer_update", "system"
+            "iot_alert", "referral", "transfer_update", "system", "new_message"
         }
         if notification_type not in valid_types:
             raise HTTPException(
@@ -267,7 +267,7 @@ class NotificationService:
             user_id=recipient_user_id,
             title=title,
             message=message,
-            notification_type="assignment",  # Using existing type from constraint
+            notification_type="new_message",
             priority="normal",
             sent_via="in_app",
             related_entity_type="conversation",
