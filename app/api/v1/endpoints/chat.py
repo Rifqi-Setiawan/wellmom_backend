@@ -3,6 +3,7 @@
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, get_db, require_role
@@ -127,10 +128,15 @@ def list_conversations(
     # Enrich with last message and unread count
     enriched_conversations = []
     for conv in conversations:
-        # Get last message
+        # Get last message - query explicitly to ensure correct ordering
         last_message = None
-        if conv.messages:
-            last_message = conv.messages[0]  # Already ordered desc
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == conv.id)
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        last_message = db.scalar(stmt)
         
         # Get unread count
         unread_count = crud_conversation.get_unread_count(
