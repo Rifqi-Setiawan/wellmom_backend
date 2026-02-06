@@ -87,8 +87,18 @@ app.include_router(api_router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on application startup."""
+    logger.info("=" * 50)
+    logger.info("Starting WellMom Backend - Firebase Initialization")
+    logger.info("=" * 50)
+
     firebase_service.initialize()
-    logger.info("Firebase Cloud Messaging initialized")
+
+    if firebase_service.is_initialized():
+        logger.info("✅ Firebase Cloud Messaging - READY")
+    else:
+        logger.warning("⚠️  Firebase Cloud Messaging - DISABLED or FAILED")
+
+    logger.info("=" * 50)
 
 
 # Root endpoint
