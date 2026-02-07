@@ -125,7 +125,7 @@ def list_conversations(
             db, perawat_id=perawat.id, skip=skip, limit=limit
         )
     
-    # Enrich with last message and unread count
+    # Enrich with last message, unread count, and photo profile
     enriched_conversations = []
     for conv in conversations:
         # Get last message - query explicitly to ensure correct ordering
@@ -143,6 +143,29 @@ def list_conversations(
             db, conversation_id=conv.id, user_id=current_user.id
         )
         
+        # Get photo profile of the other participant
+        other_participant_photo_url = None
+        if current_user.role == "ibu_hamil":
+            # Current user is ibu_hamil, get perawat's photo
+            if conv.perawat:
+                # Prefer perawat's profile_photo_url, fallback to user's profile_photo_url if available
+                other_participant_photo_url = conv.perawat.profile_photo_url
+                if not other_participant_photo_url and conv.perawat.user_id:
+                    # Query user's profile_photo_url if perawat doesn't have one
+                    perawat_user = db.get(User, conv.perawat.user_id)
+                    if perawat_user:
+                        other_participant_photo_url = perawat_user.profile_photo_url
+        elif current_user.role == "perawat":
+            # Current user is perawat, get ibu_hamil's photo
+            if conv.ibu_hamil:
+                # Prefer ibu_hamil's profile_photo_url, fallback to user's profile_photo_url if available
+                other_participant_photo_url = conv.ibu_hamil.profile_photo_url
+                if not other_participant_photo_url and conv.ibu_hamil.user_id:
+                    # Query user's profile_photo_url if ibu_hamil doesn't have one
+                    ibu_hamil_user = db.get(User, conv.ibu_hamil.user_id)
+                    if ibu_hamil_user:
+                        other_participant_photo_url = ibu_hamil_user.profile_photo_url
+        
         enriched = ConversationWithLastMessage(
             id=conv.id,
             ibu_hamil_id=conv.ibu_hamil_id,
@@ -153,6 +176,7 @@ def list_conversations(
             last_message_text=last_message.message_text if last_message else None,
             last_message_sender_id=last_message.sender_user_id if last_message else None,
             unread_count=unread_count,
+            other_participant_photo_url=other_participant_photo_url,
         )
         enriched_conversations.append(enriched)
     

@@ -32,6 +32,8 @@ class ConversationWithLastMessage(ConversationResponse):
     last_message_text: Optional[str] = None
     last_message_sender_id: Optional[int] = None
     unread_count: int = 0
+    # Photo profile of the other participant
+    other_participant_photo_url: Optional[str] = None
     
     class Config:
         from_attributes = True

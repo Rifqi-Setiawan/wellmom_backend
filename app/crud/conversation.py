@@ -54,15 +54,18 @@ class CRUDConversation(CRUDBase[Conversation, ConversationCreate, dict]):
         skip: int = 0,
         limit: int = 50
     ) -> List[Conversation]:
-        """Get all conversations for an ibu hamil."""
+        """Get all conversations for an ibu hamil with eager loading."""
         stmt = (
             select(Conversation)
+            .options(
+                joinedload(Conversation.perawat)
+            )
             .where(Conversation.ibu_hamil_id == ibu_hamil_id)
             .order_by(Conversation.last_message_at.desc().nulls_last(), Conversation.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
-        return list(db.scalars(stmt).all())
+        return list(db.scalars(stmt).unique().all())
     
     def get_by_perawat(
         self, 
@@ -72,15 +75,18 @@ class CRUDConversation(CRUDBase[Conversation, ConversationCreate, dict]):
         skip: int = 0,
         limit: int = 50
     ) -> List[Conversation]:
-        """Get all conversations for a perawat."""
+        """Get all conversations for a perawat with eager loading."""
         stmt = (
             select(Conversation)
+            .options(
+                joinedload(Conversation.ibu_hamil)
+            )
             .where(Conversation.perawat_id == perawat_id)
             .order_by(Conversation.last_message_at.desc().nulls_last(), Conversation.created_at.desc())
             .offset(skip)
             .limit(limit)
         )
-        return list(db.scalars(stmt).all())
+        return list(db.scalars(stmt).unique().all())
     
     def get_with_last_message(
         self,
