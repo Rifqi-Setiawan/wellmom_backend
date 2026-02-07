@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from sqlalchemy import select, func, update
 from app.models.notification import Notification
 from app.models.ibu_hamil import IbuHamil
 from app.schemas.notification import NotificationCreate
+from app.services.firebase_service import firebase_service
 from app.services.firebase_service import firebase_service
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class NotificationService:
         related_entity_type: Optional[str] = None,
         related_entity_id: Optional[int] = None,
         scheduled_for: Optional[datetime] = None,
+        fcm_data: Optional[Dict[str, str]] = None,
     ) -> Notification:
         """
         Create a new notification.
@@ -145,18 +147,25 @@ class NotificationService:
 
             # Send push notification via Firebase
             try:
+                # Build FCM data payload
+                fcm_payload = fcm_data.copy() if fcm_data else {}
+                # Always include click_action for Flutter navigation
+                fcm_payload["click_action"] = "FLUTTER_NOTIFICATION_CLICK"
+                # Include notification metadata
+                fcm_payload["notification_id"] = str(notification.id)
+                fcm_payload["notification_type"] = notification_type
+                fcm_payload["priority"] = priority
+                if related_entity_type:
+                    fcm_payload["related_entity_type"] = related_entity_type
+                if related_entity_id:
+                    fcm_payload["related_entity_id"] = str(related_entity_id)
+                
                 firebase_service.send_notification_to_user(
                     db=db,
                     user_id=user_id,
                     title=title,
                     body=message,
-                    data={
-                        "notification_id": str(notification.id),
-                        "notification_type": notification_type,
-                        "priority": priority,
-                        "related_entity_type": related_entity_type or "",
-                        "related_entity_id": str(related_entity_id) if related_entity_id else "",
-                    },
+                    data=fcm_payload,
                     priority=priority,
                 )
             except Exception as e:
@@ -219,6 +228,13 @@ class NotificationService:
         # Format message with perawat name
         message = config["message_template"].format(perawat_name=perawat_name)
 
+        # Prepare FCM data payload for Flutter navigation
+        fcm_data = {
+            "type": "health_risk",
+            "risk_level": risk_level,
+            "ibu_hamil_id": str(ibu_hamil_id),
+        }
+
         # Create notification
         notification = self.create_notification(
             db,
@@ -230,6 +246,7 @@ class NotificationService:
             sent_via=config["sent_via"],
             related_entity_type="ibu_hamil",
             related_entity_id=ibu_hamil_id,
+            fcm_data=fcm_data,
         )
 
         logger.info(
@@ -262,6 +279,12 @@ class NotificationService:
         title = f"Pesan baru dari {sender_name}"
         message = "Anda menerima pesan baru. Tap untuk melihat."
 
+        # Prepare FCM data payload for Flutter navigation
+        fcm_data = {
+            "type": "chat",
+            "conversation_id": str(conversation_id),
+        }
+
         notification = self.create_notification(
             db,
             user_id=recipient_user_id,
@@ -272,6 +295,7 @@ class NotificationService:
             sent_via="in_app",
             related_entity_type="conversation",
             related_entity_id=conversation_id,
+            fcm_data=fcm_data,
         )
 
         logger.info(

@@ -1,5 +1,6 @@
 """User endpoints."""
 
+import logging
 from datetime import datetime
 from typing import List
 
@@ -14,6 +15,8 @@ from app.api.deps import (
 from app.crud import crud_user
 from app.models.user import User
 from app.schemas.user import FCMTokenUpdate, UserResponse, UserUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/users",
@@ -213,6 +216,12 @@ async def delete_user(
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
     summary="Update FCM token",
+    description="""
+    Update FCM token for push notifications.
+    
+    This endpoint allows mobile apps (Flutter) to register or update their FCM token.
+    The token will be used to send push notifications to the device.
+    """,
 )
 async def update_fcm_token(
     token_data: FCMTokenUpdate,
@@ -223,18 +232,32 @@ async def update_fcm_token(
     Update FCM token for push notifications.
 
     Args:
-        token_data: FCM token data
+        token_data: FCM token data containing the token string
         current_user: Current active user (injected via JWT token)
         db: Database session
 
     Returns:
-        User: Updated user data
+        User: Updated user data with new FCM token
+
+    Raises:
+        HTTPException: If database update fails
     """
-    current_user.fcm_token = token_data.fcm_token
-    current_user.fcm_token_updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(current_user)
-    return current_user
+    try:
+        current_user.fcm_token = token_data.fcm_token
+        current_user.fcm_token_updated_at = datetime.utcnow()
+        db.add(current_user)
+        db.commit()
+        db.refresh(current_user)
+        
+        logger.info(f"FCM token updated for user_id={current_user.id}")
+        return current_user
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update FCM token for user_id={current_user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gagal memperbarui FCM token"
+        )
 
 
 __all__ = ["router"]

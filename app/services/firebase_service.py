@@ -122,6 +122,8 @@ class FirebaseService:
         data: Optional[Dict[str, str]] = None,
         priority: str = "high",
         image_url: Optional[str] = None,
+        db: Optional[Any] = None,
+        user_id: Optional[int] = None,
     ) -> Optional[str]:
         """
         Send a push notification to a single device.
@@ -133,6 +135,8 @@ class FirebaseService:
             data: Optional data payload for deep linking.
             priority: "high" or "normal".
             image_url: Optional image URL for rich notifications.
+            db: Optional database session for token cleanup on error.
+            user_id: Optional user ID for token cleanup on error.
 
         Returns:
             Message ID string on success, None on failure.
@@ -156,6 +160,15 @@ class FirebaseService:
 
         except messaging.UnregisteredError:
             logger.warning(f"FCM token unregistered (device removed app): {token[:20]}...")
+            # Remove invalid token from database if db and user_id provided
+            if db and user_id:
+                self._remove_invalid_token(db, user_id, token)
+            return None
+        except messaging.InvalidArgumentError as e:
+            logger.error(f"FCM invalid token argument: {e}")
+            # Remove invalid token from database if db and user_id provided
+            if db and user_id:
+                self._remove_invalid_token(db, user_id, token)
             return None
         except ValueError as e:
             logger.error(f"FCM invalid argument: {e}")
@@ -163,6 +176,29 @@ class FirebaseService:
         except Exception as e:
             logger.error(f"FCM send failed: {e}")
             return None
+
+    def _remove_invalid_token(self, db: Any, user_id: int, token: str) -> None:
+        """
+        Remove invalid FCM token from user's record in database.
+
+        Args:
+            db: Database session
+            user_id: User ID whose token should be removed
+            token: The invalid token (for logging)
+        """
+        try:
+            from app.models.user import User
+
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.fcm_token == token:
+                user.fcm_token = None
+                user.fcm_token_updated_at = None
+                db.add(user)
+                db.commit()
+                logger.info(f"Removed invalid FCM token for user_id={user_id}")
+        except Exception as e:
+            logger.error(f"Failed to remove invalid token for user_id={user_id}: {e}")
+            db.rollback()
 
     def send_notification_to_user(
         self,
@@ -210,6 +246,8 @@ class FirebaseService:
                 body=body,
                 data=data,
                 priority=priority,
+                db=db,
+                user_id=user_id,
             )
 
         except Exception as e:

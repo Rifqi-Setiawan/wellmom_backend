@@ -1526,7 +1526,15 @@ def set_patient_risk_level(
                     )
 
                 try:
-                    notification_data = NotificationCreate(
+                    # Prepare FCM data payload for Flutter navigation
+                    fcm_data = {
+                        "type": "health_risk",
+                        "risk_level": payload.risk_level,
+                        "ibu_hamil_id": str(ibu_hamil.id),
+                    }
+                    
+                    notification_service.create_notification(
+                        db=db,
                         user_id=kerabat.kerabat_user_id,
                         title=title,
                         message=message,
@@ -1535,8 +1543,8 @@ def set_patient_risk_level(
                         sent_via="in_app",
                         related_entity_type="ibu_hamil",
                         related_entity_id=ibu_hamil.id,
+                        fcm_data=fcm_data,
                     )
-                    crud_notification.create(db, obj_in=notification_data)
                 except Exception:
                     pass  # Don't fail main operation if notification fails
 

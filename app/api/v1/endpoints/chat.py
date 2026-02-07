@@ -385,10 +385,11 @@ def send_message(
                     title=f"Pesan baru dari {current_user.full_name}",
                     body=message_in.message_text[:100],
                     data={
-                        "type": "new_message",
+                        "type": "chat",
                         "conversation_id": str(conversation.id),
                         "sender_id": str(current_user.id),
                         "sender_name": current_user.full_name,
+                        "click_action": "FLUTTER_NOTIFICATION_CLICK",
                     },
                     priority="high",
                 )
