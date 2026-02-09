@@ -6,7 +6,9 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from app.api import deps
+from app.models.user import User
+from app.schemas.user import FCMTokenUpdate
 from app.api.deps import (
     get_current_active_user,
     get_db,
@@ -249,15 +251,35 @@ async def update_fcm_token(
         db.commit()
         db.refresh(current_user)
         
+        # Log untuk debugging di VPS
+        print(f"DEBUG: FCM Token updated for user {current_user.id}")
         logger.info(f"FCM token updated for user_id={current_user.id}")
         return current_user
     except Exception as e:
         db.rollback()
+        print(f"❌ [BACKEND] Error updating token: {str(e)}")
         logger.error(f"Failed to update FCM token for user_id={current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Gagal memperbarui FCM token"
         )
+
+
+# Alias PUT untuk kompatibilitas dengan beberapa klien
+@router.put(
+    "/me/fcm-token",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update FCM token (alias PUT)",
+    include_in_schema=False,  # Hidden dari docs untuk menghindari duplikasi
+)
+async def update_fcm_token_put(
+    token_data: FCMTokenUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Alias PUT untuk update_fcm_token - delegasi ke handler PATCH."""
+    return await update_fcm_token(token_data, current_user, db)
 
 
 __all__ = ["router"]
