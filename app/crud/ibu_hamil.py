@@ -169,12 +169,68 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
         Returns:
             Updated IbuHamil instance
         """
-        # Convert Pydantic model to dict (exclude location and riwayat_kesehatan_ibu)
+        # Convert Pydantic model to dict (exclude location and riwayat_kesehatan_ibu if present)
         update_data = obj_in.model_dump(exclude_unset=True, exclude={"location", "riwayat_kesehatan_ibu"})
-        
+
+        riwayat_kesehatan_ibu = getattr(obj_in, "riwayat_kesehatan_ibu", None)
         # Handle nested riwayat_kesehatan_ibu -> flatten to individual boolean columns
-        if obj_in.riwayat_kesehatan_ibu is not None:
-            riwayat = obj_in.riwayat_kesehatan_ibu.model_dump()
+        if riwayat_kesehatan_ibu is not None:
+            riwayat = riwayat_kesehatan_ibu.model_dump()
+            update_data.update(
+                {
+                    "darah_tinggi": riwayat.get("darah_tinggi"),
+                    "diabetes": riwayat.get("diabetes"),
+                    "anemia": riwayat.get("anemia"),
+                    "penyakit_jantung": riwayat.get("penyakit_jantung"),
+                    "asma": riwayat.get("asma"),
+                    "penyakit_ginjal": riwayat.get("penyakit_ginjal"),
+                    "tbc_malaria": riwayat.get("tbc_malaria"),
+                }
+            )
+
+        # Handle location tuple -> convert to PostGIS Geography
+        # Only process if location attribute exists and is not None
+        if hasattr(obj_in, "location") and obj_in.location is not None:
+            lon, lat = obj_in.location
+            location_wkt = f"POINT({lon} {lat})"
+            update_data["location"] = ST_GeogFromText(location_wkt)
+        
+        # Update object attributes
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        
+        db.add(db_obj)
+        try:
+            db.commit()
+            db.refresh(db_obj)
+        except Exception:
+            db.rollback()
+            raise
+        
+        return db_obj
+
+    def update_kehamilan(
+        self, db: Session, *, db_obj: IbuHamil, obj_in
+    ) -> IbuHamil:
+        """Update IbuHamil kehamilan data only (without location).
+        
+        This is specifically for IbuHamilUpdateKehamilan schema which doesn't include location field.
+        
+        Args:
+            db: Database session
+            db_obj: Existing IbuHamil instance
+            obj_in: IbuHamilUpdateKehamilan schema (kehamilan + riwayat kesehatan data)
+            
+        Returns:
+            Updated IbuHamil instance
+        """
+        # Convert Pydantic model to dict (exclude riwayat_kesehatan_ibu if present)
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"riwayat_kesehatan_ibu"})
+
+        riwayat_kesehatan_ibu = getattr(obj_in, "riwayat_kesehatan_ibu", None)
+        # Handle nested riwayat_kesehatan_ibu -> flatten to individual boolean columns
+        if riwayat_kesehatan_ibu is not None:
+            riwayat = riwayat_kesehatan_ibu.model_dump()
             update_data.update(
                 {
                     "darah_tinggi": riwayat.get("darah_tinggi"),
@@ -187,8 +243,40 @@ class CRUDIbuHamil(CRUDBase[IbuHamil, IbuHamilCreate, IbuHamilUpdate]):
                 }
             )
         
+        # Update object attributes
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        
+        db.add(db_obj)
+        try:
+            db.commit()
+            db.refresh(db_obj)
+        except Exception:
+            db.rollback()
+            raise
+        
+        return db_obj
+
+    def update_identitas(
+        self, db: Session, *, db_obj: IbuHamil, obj_in
+    ) -> IbuHamil:
+        """Update IbuHamil identitas data (with location support).
+        
+        This is specifically for IbuHamilUpdateIdentitas schema which includes location field.
+        
+        Args:
+            db: Database session
+            db_obj: Existing IbuHamil instance
+            obj_in: IbuHamilUpdateIdentitas schema (identitas + alamat + lokasi data)
+            
+        Returns:
+            Updated IbuHamil instance
+        """
+        # Convert Pydantic model to dict (exclude location if present)
+        update_data = obj_in.model_dump(exclude_unset=True, exclude={"location"})
+
         # Handle location tuple -> convert to PostGIS Geography
-        if obj_in.location is not None:
+        if hasattr(obj_in, "location") and obj_in.location is not None:
             lon, lat = obj_in.location
             location_wkt = f"POINT({lon} {lat})"
             update_data["location"] = ST_GeogFromText(location_wkt)

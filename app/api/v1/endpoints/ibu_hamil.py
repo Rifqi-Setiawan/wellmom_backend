@@ -1747,8 +1747,8 @@ async def update_my_profile_identitas(
                 detail="Koordinat lokasi tidak valid. Longitude harus antara -180 hingga 180, dan Latitude antara -90 hingga 90.",
             )
     
-    # Update profil identitas
-    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=identitas_update)
+    # Update profil identitas (menggunakan metode khusus untuk identitas dengan location)
+    updated = crud_ibu_hamil.update_identitas(db, db_obj=ibu, obj_in=identitas_update)
     
     return updated
 
@@ -1862,8 +1862,8 @@ async def update_my_profile_kehamilan(
             detail="Profil Ibu Hamil tidak ditemukan",
         )
     
-    # Update profil kehamilan
-    updated = crud_ibu_hamil.update(db, db_obj=ibu, obj_in=kehamilan_update)
+    # Update profil kehamilan (menggunakan metode khusus untuk kehamilan tanpa location)
+    updated = crud_ibu_hamil.update_kehamilan(db, db_obj=ibu, obj_in=kehamilan_update)
     
     return updated
 

@@ -375,11 +375,6 @@ def reset_password_perawat(
         "user_id": current_user.id,
     }
 
-
-# ============================================
-# PROFILE SETTINGS ENDPOINTS (Self-service)
-# ============================================
-
 @router.get(
     "/me",
     response_model=PerawatProfileResponse,
