@@ -89,3 +89,5 @@ check_*.py
 *_test.py
 *_debug.py
 *_check.py
+
+migrations/

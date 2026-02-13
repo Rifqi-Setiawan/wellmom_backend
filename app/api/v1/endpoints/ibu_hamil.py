@@ -113,7 +113,7 @@ class IbuHamilRegisterRequest(BaseModel):
                     "tbc_malaria": False
                 },
                 "age": 39,
-                "blood_type": "O+",
+                "blood_type": "O",
                 "healthcare_preference": "puskesmas",
                 "whatsapp_consent": True,
                 "data_sharing_consent": False
@@ -352,7 +352,7 @@ Endpoint untuk registrasi ibu hamil baru ke dalam sistem WellMom.
 - `pernah_perdarahan_saat_hamil`: Pernah perdarahan saat hamil (default: false)
 - `riwayat_kesehatan_ibu`: Object berisi riwayat kesehatan (darah_tinggi, diabetes, anemia, dll)
 - `age`: Usia ibu hamil
-- `blood_type`: Golongan darah (A+, A-, B+, B-, AB+, AB-, O+, O-)
+- `blood_type`: Golongan darah (A, B, AB, O)
 - `emergency_contact_relation`: Hubungan dengan kontak darurat
 - `healthcare_preference`: Preferensi layanan kesehatan
 - `whatsapp_consent`: Persetujuan menerima notifikasi via WhatsApp (default: true)
@@ -383,7 +383,7 @@ Endpoint untuk registrasi ibu hamil baru ke dalam sistem WellMom.
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "age": 39,
-                            "blood_type": "O+",
+                            "blood_type": "O",
                             "last_menstrual_period": "2024-12-01",
                             "estimated_due_date": "2025-09-08",
                             "usia_kehamilan": 8,
@@ -904,7 +904,7 @@ Mengambil profil ibu hamil milik user yang sedang login.
                         "nik": "3175091201850001",
                         "date_of_birth": "1985-12-12",
                         "age": 39,
-                        "blood_type": "O+",
+                        "blood_type": "O",
                         "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_hamil_1_20250118_123456.jpg",
                         "last_menstrual_period": "2024-12-01",
                         "estimated_due_date": "2025-09-08",
@@ -2035,7 +2035,7 @@ Mengambil detail profil ibu hamil berdasarkan ID.
                         "nik": "3175091201850001",
                         "date_of_birth": "1985-12-12",
                         "age": 39,
-                        "blood_type": "O+",
+                        "blood_type": "O",
                         "profile_photo_url": "/uploads/photos/profiles/ibu_hamil_1.jpg",
                         "last_menstrual_period": "2024-12-01",
                         "estimated_due_date": "2025-09-08",
@@ -2735,7 +2735,7 @@ Mendapatkan daftar ibu hamil yang terdaftar di puskesmas tertentu.
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "age": 39,
-                            "blood_type": "O+",
+                            "blood_type": "O",
                             "profile_photo_url": "/uploads/photos/profiles/ibu_hamil_1.jpg",
                             "last_menstrual_period": "2024-12-01",
                             "estimated_due_date": "2025-09-08",
@@ -2894,7 +2894,7 @@ Mendapatkan daftar ibu hamil yang ditugaskan ke perawat tertentu.
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "age": 39,
-                            "blood_type": "O+",
+                            "blood_type": "O",
                             "usia_kehamilan": 8,
                             "risk_level": "sedang",
                             "is_active": True
@@ -3016,7 +3016,7 @@ Mendapatkan daftar lengkap ibu hamil yang terdaftar di puskesmas milik admin yan
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "age": 39,
-                            "blood_type": "O+",
+                            "blood_type": "O",
                             "usia_kehamilan": 8,
                             "kehamilan_ke": 2,
                             "jumlah_anak": 1,
@@ -3127,7 +3127,7 @@ Mendapatkan daftar lengkap ibu hamil yang ditugaskan ke perawat yang sedang logi
                             "nik": "3175091201850001",
                             "date_of_birth": "1985-12-12",
                             "age": 39,
-                            "blood_type": "O+",
+                            "blood_type": "O",
                             "usia_kehamilan": 8,
                             "kehamilan_ke": 2,
                             "jumlah_anak": 1,
@@ -3456,7 +3456,7 @@ Data yang dikembalikan adalah semua data yang diisi saat registrasi.
                         "nik": "3175091201850001",
                         "date_of_birth": "1985-12-12",
                         "age": 39,
-                        "blood_type": "O+",
+                        "blood_type": "O",
                         "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_hamil_1.jpg",
                         "last_menstrual_period": "2024-12-01",
                         "estimated_due_date": "2025-09-08",
@@ -3556,3 +3556,4 @@ async def get_ibu_hamil_detail(
 
 
 __all__ = ["router"]
+

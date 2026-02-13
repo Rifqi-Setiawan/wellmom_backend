@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 RISK_LEVELS = {"rendah", "sedang", "tinggi"}
 ASSIGNMENT_METHODS = {"auto", "manual"}
-VALID_BLOOD_TYPES = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"}
+VALID_BLOOD_TYPES = {"A", "B", "AB", "O"}
 
 
 # ============================================================================
@@ -164,7 +164,7 @@ class IbuHamilBase(BaseModel):
 
     # Optional fields
     age: Optional[int] = None
-    blood_type: Optional[str] = None  # A+, A-, B+, B-, AB+, AB-, O+, O-
+    blood_type: Optional[str] = None  # A, B, AB, O
     risk_level: Optional[str] = None  # DIABAIKAN saat registrasi! Ditentukan oleh perawat (rendah/sedang/tinggi)
     healthcare_preference: Optional[str] = None
     whatsapp_consent: Optional[bool] = True
@@ -208,7 +208,7 @@ class IbuHamilBase(BaseModel):
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
             "age": 39,
-            "blood_type": "O+",
+            "blood_type": "O",
             "address": "Jl. Mawar No. 10, RT 02 RW 05",
             "provinsi": "Jambi",
             "kota_kabupaten": "Kerinci",
@@ -486,7 +486,7 @@ class IbuHamilResponse(BaseModel):
             "nik": "3175091201850001",
             "date_of_birth": "1985-12-12",
             "age": 39,
-            "blood_type": "O+",
+            "blood_type": "O",
             "profile_photo_url": "/uploads/photos/profiles/ibu_hamil/ibu_hamil_1_20250118_123456.jpg",
             "last_menstrual_period": "2024-12-01",
             "estimated_due_date": "2025-09-08",
@@ -569,7 +569,7 @@ class IbuHamilProfileResponse(BaseModel):
                 "nik": "3175091201850001",
                 "date_of_birth": "1985-12-12",
                 "age": 39,
-                "blood_type": "O+",
+                "blood_type": "O",
                 "location": [101.3912, -2.0645],
                 "address": "Jl. Mawar No. 10, RT 02 RW 05",
                 "provinsi": "Jambi",
